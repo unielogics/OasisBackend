@@ -1373,7 +1373,7 @@ CREATE TABLE public.invoices (
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     vehicle_class_label text,
     tax_dbp integer NOT NULL,
-    tax_rounding text DEFAULT 'half_even'::text NOT NULL,
+    tax_rounding text DEFAULT 'half_up'::text NOT NULL,
     CONSTRAINT invoices_cancel_reason_check CHECK (((cancel_reason IS NULL) OR (cancel_reason = ANY (ARRAY['canceled'::text, 'no_show'::text])))),
     CONSTRAINT invoices_check CHECK (((canceled_at IS NULL) = (cancel_reason IS NULL))),
     CONSTRAINT invoices_client_name_check CHECK ((btrim(client_name) <> ''::text)),

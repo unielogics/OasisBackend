@@ -43,7 +43,7 @@ export interface InvoicesTable {
   date_frozen_at: Date | null
   /** Thousandths of a percent (ADR 0173): 7000 = 7%, 6625 = 6.625%. */
   tax_dbp: number
-  /** half_up before ADR 0173 (numbers unchanged), half_even (Square's rule) since. */
+  /** The location's tax.rounding when the invoice was made (ADR 0173): half_up (default, every older invoice) or half_even (Square's rule). */
   tax_rounding: Generated<TaxRounding>
   tip_cents: Generated<number>
   canceled_at: Date | null

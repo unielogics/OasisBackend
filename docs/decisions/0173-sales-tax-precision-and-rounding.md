@@ -1,7 +1,8 @@
 # 0173 Sales tax: a precise rate (6.625%) and Square's rounding
 Status: accepted (2026-10-13, owner plan "NEW PLAN (2026-10-13)", section C "Tax first"); built in wave K1e (backend). The
 dashboard's twin (`src/lib/payments/cents.ts`) follows in wave K2 (package k-items-dash, section "Dashboard twin" below).
-Production stays at 7% until the rollout step "Tax: set to 6.625%".
+Production stays at 7%, rounded half-up exactly as before, until the rollout step "Tax: set to 6.625% and Square's rounding",
+which comes after the dashboard twin is deployed.
 
 ## Context
 
@@ -28,7 +29,7 @@ candidate rules. Result (full table: `docs/integrations/square.md` section 15; r
 - At 7% a whole-dollar subtotal never ends in half a cent, so both rules agree; they differ only on subtotals of $x.50 with x odd
   (`$1.50`: Square 10 cents, half-up 11).
 
-| Subtotal | 6.625%: Square = Oasis (new) | half-up | 7%: Square = Oasis (new) | half-up |
+| Subtotal | 6.625%: Square = half_even | half-up | 7%: Square = half_even | half-up |
 |---|---|---|---|---|
 | $4.00 | $0.26 | $0.27 | $0.28 | $0.28 |
 | $12.00 | $0.80 | $0.80 | $0.84 | $0.84 |
@@ -48,10 +49,10 @@ candidate rules. Result (full table: `docs/integrations/square.md` section 15; r
 | # | Decision |
 |---|---|
 | T1 | **Rates are stored in thousandths of a percent ("dbp", tenths of a basis point)**: 7000 = 7%, 6625 = 6.625%, 0 to 100000. The setting `tax.rate_bp` is **replaced** by `tax.rate_dbp` (default 7000; a stored value is carried over × 10 by the migration) and `invoices.tax_bp` by `invoices.tax_dbp` (every row × 10). Keeping the old columns "in step" was rejected: 662.5 cannot be stored in them, and two sources of one rate drift. |
-| T2 | **Each invoice keeps its own rounding rule**, `invoices.tax_rounding`: `half_up` for every invoice that existed before the migration (their numbers never change; production had 0 invoices), **`half_even` (Square's rule) for every new invoice**, whatever the rate. The gateway writes it explicitly; the column default is the same. |
+| T2 | **Each invoice keeps its own rounding rule**, `invoices.tax_rounding`: `half_up` for every invoice that existed before the migration (their numbers never change). **A new invoice takes the location's setting `tax.rounding`**: `half_up` by default (the design's rule), so deploying this changes no 7% invoice number (at 7% the two rules differ on subtotals of $x.50 with x odd: $13.50 is 95 cents half-up, 94 half to even); **`half_even` (Square's rule) is switched on at the rollout, together with 6.625%** (`PUT /settings/billing/sales-tax {percent: "6.625", rounding: "half_even"}`). The gateway writes it explicitly; the column default is `half_up`, the setting's default. (Verifier finding F1: an unconditional `half_even` would have changed 7% numbers before the switch.) |
 | T3 | **The tax is rounded once per invoice on its adjusted subtotal** (items + adjustments, never below 0), as before and as Square does. Tips stay untaxed. Nothing is rounded per line. |
 | T4 | **One rule, every twin**: `salesTaxCents(sub, {dbp, rounding})` in `src/platform/money.ts` (TS) and `sales_tax_cents(sub, dbp, rounding)` in SQL (`invoice_calc_of`), equal for every input (property tests); `calc.ts` (`calcInvoice`, `itemsRefundValue`, `adjustPreview`), `jobs-integrity.ts`, the memberships coverage preview, the in-memory gateway, the reports and the seeds all go through them. The refunds' tax part removed from net revenue stays half-up, per rate, in dbp (the same numbers as before for every whole-bp rate). |
-| T5 | **Where the rate is edited**: nowhere before (the setting had no route or screen). Now Settings → Billing & integrations: `GET /settings/billing` gains a `salesTax` block and `PUT /settings/billing/sales-tax {percent: "6.625", version}` (`set.billing`) takes a percentage with up to three decimals, 0 to 100 (`"7"`, `"6.625"`, `"6.625%"`); anything else is 422 on `percent`. A change applies to invoices made from then on. |
+| T5 | **Where the rate is edited**: nowhere before (the setting had no route or screen). Now Settings → Billing & integrations: `GET /settings/billing` gains a `salesTax` block (`rounding` = `tax.rounding`) and `PUT /settings/billing/sales-tax {percent: "6.625", rounding?, version}` (`set.billing`) takes a percentage with up to three decimals, 0 to 100 (`"7"`, `"6.625"`, `"6.625%"`); anything else is 422 on `percent`. `rounding` is optional (left out = unchanged); the rate is always written, so its version guards the block and the two are saved together or not at all. A change applies to invoices made from then on. |
 | T6 | **DTOs**: invoices (Payments detail, the operations board's invoice summary) gain `taxDbp` and `taxRounding`. `taxBp` stays one release, **deprecated**: the rate rounded half-up to whole basis points (6.625% reads 663), for a dashboard that predates this ADR. |
 | T7 | **Labels**: "7%", "6.625%" (`taxPercentLabel`: up to three decimals, no trailing zeros). The Square payment link's tax line reads "Sales tax (6.625%)"; its amount is still the invoice's own tax as a plain line (a link sets no Square tax, so Square adds none). |
 | T8 | **Verification**: `pnpm verify:square` gains SQR-18 (the CalculateOrder table against `salesTaxCents`, FAIL on any cent of difference; `--tax-only` runs just SQR-01, SQR-18 and the cleanup). The Square item library's `tax` check (ADR 0172) compares the shop's Square tax with `tax.rate_dbp` as exact decimals (`percentage` "6.625" = 6625 dbp) and blocks the item sync on a mismatch. |
@@ -62,10 +63,12 @@ Migration `20261015150000_tax_precision.sql`:
 - `sales_tax_cents(bigint, integer, text)`: immutable SQL; `half_even` = floor plus one when the remainder is more than half, or exactly
   half with an odd floor; `half_up` = `(sub × dbp + 50000) / 100000`.
 - `invoices.tax_dbp integer not null check (0..100000)` (backfilled `tax_bp × 10`), `invoices.tax_rounding text not null check in
-  ('half_up','half_even')` (existing rows `half_up`, default `half_even`); `invoices.tax_bp` dropped.
+  ('half_up','half_even')` (existing rows `half_up`, default `half_up`); `invoices.tax_bp` dropped.
 - `invoice_calc_of` recomputed with `sales_tax_cents` and the dbp net; for a `half_up` invoice with `tax_dbp = tax_bp × 10` every column
   is identical to before (the `(n×10 + 50000)/100000` and `(n + 5000)/10000` forms are the same integer).
-- Settings: a stored `tax.rate_bp` row becomes `tax.rate_dbp` (value × 10, version and author kept); the old key is gone.
+- `invoices.tax_rounding` default `half_up` (the gateway always writes the location's `tax.rounding`).
+- Settings: a stored `tax.rate_bp` row becomes `tax.rate_dbp` (value × 10, version and author kept); the old key is gone. The new
+  key `tax.rounding` (`half_up` | `half_even`, default `half_up`) needs no data.
 
 ## Dashboard twin (wave K2, package k-items-dash: `src/lib/payments/cents.ts`)
 
@@ -83,15 +86,24 @@ The live dashboard must compute exactly what the server computes:
   7000 half_up (the design's, unchanged): 50 → 4, 150 → 11, 250 → 18, 1000 → 70, 18400 → 1288, 54000 → 3780, 15400 → 1078,
   35000 → 2450. Labels: 7000 → "7%", 6625 → "6.625%", 6250 → "6.25%", 1 → "0.001%".
 - Settings → Billing & integrations: a "Sales tax" row editing `percent` (text input, up to three decimals) with `PUT
-  /settings/billing/sales-tax`, showing the server's 422 message on `percent`; a DV line in `design-patches/DEVIATIONS.md`.
+  /settings/billing/sales-tax`, showing the server's 422 message on `percent`; a DV line in `design-patches/DEVIATIONS.md`. The row
+  may show the rounding read-only ("Rounded like Square" for `half_even`); the dashboard never sends `rounding` (the orchestrator
+  sets it at the rollout).
+- Until this twin is deployed, the live dashboard computes previews and the label from the deprecated `taxBp` half-up: exact at 7%
+  with `half_up`, wrong at 6.625% (reads 663 bp: "Tax (6.63%)", $50 previews 332 cents against the server's 331) and on `half_even`
+  invoices. Hence rollout step 3 below.
 
 ## Rollout
 
-1. Deploy (rate still 7%; new invoices round half to even, which for whole-dollar 7% subtotals changes nothing).
-2. Square production: the shop's tax in Square must be 6.625% ADDITIVE at the location (Test connection's `tax` check, ADR 0172).
-3. The orchestrator sets 6.625% in Settings → Billing & integrations (or `PUT /settings/billing/sales-tax {percent: "6.625"}`), then
-   confirms with a test invoice: $100.00 → $6.62.
-4. `pnpm verify:square --tax-only` against the sandbox whenever the Square-Version is bumped.
+1. Deploy (rate still 7%, `tax.rounding` still `half_up`: every new invoice is made exactly as before, and the current dashboard's
+   `taxBp` previews stay exact).
+2. Deploy the dashboard twin (wave K2, package k-items-dash: `cents.ts` on `taxDbp` + `taxRounding`, the 6.625% label).
+   **6.625% and `half_even` must not be set before this**: the older dashboard would label "Tax (6.63%)" and preview adjustments
+   and by-item refunds 1 cent off the server (verifier finding F2).
+3. Square production: the shop's tax in Square must be 6.625% ADDITIVE at the location (Test connection's `tax` check, ADR 0172).
+4. The orchestrator sets both in one save: `PUT /settings/billing/sales-tax {percent: "6.625", rounding: "half_even", version}`,
+   then confirms with a test invoice: $100.00 → $6.62 (half-up would be $6.63), and $4 + $4 → $0.53.
+5. `pnpm verify:square --tax-only` against the sandbox whenever the Square-Version is bumped.
 
 ## Not changed
 

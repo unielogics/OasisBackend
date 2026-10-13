@@ -492,13 +492,15 @@ would also move anyone Oasis did not notify), and Square swaps at the next billi
 subtotal (after an order discount) and rounded **half to even**; Square then spreads it over the lines (`$4 + $4` at 6.625% is 53
 cents, shown as 26 + 27). The same holds for an order-level tax, a tax applied per line item and catalog items with a catalog TAX
 auto-applied (the POS path). All 200 answers fit exactly one of the six rules tried (half-up or half-even, per order, per line or per
-unit): per order, half to even. Oasis rounds every new invoice that way (`tax_rounding half_even`); invoices made before ADR 0173
-keep `half_up`. At 7% a whole-dollar subtotal never ends in half a cent, so both rules agree; at 6.625% every subtotal of $4 + a
+unit): per order, half to even. Oasis rounds a new invoice by the location's setting `tax.rounding`: `half_up` by default (today's
+numbers), `half_even` (Square's rule) once the rollout switches it together with 6.625%; each invoice keeps its own
+`tax_rounding`. At 7% a whole-dollar subtotal never ends in half a cent, so both rules agree; at 6.625% every subtotal of $4 + a
 multiple of $8 ends in exactly half a cent, and half of those ($4, $20, $36, ... $100, ... $500) are one cent lower at Square than
 half-up.
 
 The rate is `tax.rate_dbp` (thousandths of a percent: 7000 = 7%, 6625 = 6.625%), edited in Settings → Billing & integrations
-(`PUT /settings/billing/sales-tax {percent: "6.625"}`); each invoice keeps its own rate and rounding. The shop's tax in Square must be
+(`PUT /settings/billing/sales-tax {percent: "6.625", rounding: "half_even", version}` at the rollout, after the dashboard twin is
+deployed); each invoice keeps its own rate and rounding. The shop's tax in Square must be
 the same percentage, ADDITIVE, at the location (the item library's `tax` check, ADR 0172, compares them as exact decimals).
 
 Re-run after a Square-Version bump: `pnpm verify:square --secret oasis/sandbox/square --location LCEVRH6NQ775N --tax-only`. The

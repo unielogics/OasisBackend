@@ -59,7 +59,7 @@ export async function makeInvoice(
     items?: { name: string; priceCents: number; kind?: 'package' | 'addon' }[]
     /** Thousandths of a percent (default 7000 = 7%). */
     taxDbp?: number
-    /** Default half_up: the rule these fixtures were written with (new invoices from the gateway round half_even, ADR 0173). */
+    /** Default half_up: the rule these fixtures were written with (also the default of tax.rounding, ADR 0173). */
     taxRounding?: 'half_up' | 'half_even'
     tipCents?: number
     bizDate?: string

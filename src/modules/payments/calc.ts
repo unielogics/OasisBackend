@@ -19,7 +19,7 @@ export interface CalcInput {
   events: readonly CalcEvent[]
   /** The invoice's own rate in thousandths of a percent (invoices.tax_dbp: 7000 = 7%, 6625 = 6.625%; ADR 0173). */
   taxDbp: number
-  /** The invoice's own rounding (invoices.tax_rounding): half_up before ADR 0173, half_even (Square's rule) since. */
+  /** The invoice's own rounding (invoices.tax_rounding): half_up (the default) or half_even (Square's rule, ADR 0173). */
   taxRounding: TaxRounding
   tipCents: number
   canceled: boolean

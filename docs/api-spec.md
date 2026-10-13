@@ -11,7 +11,7 @@ by each vertical below the generated table.
 |---|---|
 | Prefix and version | Domain routes live under `/api/v1` (additive changes only; breaking changes mean `/v2`). Every `/api/*` response carries `X-API-Version: 1`. Probes (`/healthz`, `/readyz`) and provider callbacks (`/hooks/*`) sit outside the prefix. |
 | Same origin | The dashboard and API share one origin behind the reverse proxy, so there is no CORS. Cookies are host-only. |
-| Money | Integer cents everywhere (`...Cents`). The API never formats money; CSV uses plain decimals (`1234.50`). Tax is rounded once on the adjusted subtotal at the invoice's own rate `taxDbp` (thousandths of a percent: 7000 = 7%, 6625 = 6.625%; the location's `tax.rate_dbp`, default 7000) by the invoice's own `taxRounding` (`half_even`, Square's rule, on every invoice since ADR 0173; `half_up` on older ones); tip is untaxed. Helpers: `src/platform/money.ts`. |
+| Money | Integer cents everywhere (`...Cents`). The API never formats money; CSV uses plain decimals (`1234.50`). Tax is rounded once on the adjusted subtotal at the invoice's own rate `taxDbp` (thousandths of a percent: 7000 = 7%, 6625 = 6.625%; the location's `tax.rate_dbp`, default 7000) by the invoice's own `taxRounding` (the location's `tax.rounding` when it was made: `half_up` by default, `half_even` = Square's rule once switched; ADR 0173); tip is untaxed. Helpers: `src/platform/money.ts`. |
 | Time | Instants are ISO-8601 UTC. Business dates are `YYYY-MM-DD` in the location timezone (`America/New_York`); wall-clock times are minutes from midnight. Read models that show a time string also carry a ready label (`time`, `atLabel`). Helpers: `src/platform/time.ts`. Time is injected (`Clock`, SQL `app_now()`); see section 8. |
 | Ids | UUIDv7 generated in the app (`createIdGenerator(clock)`); human refs (`INV-20611`, appointment seq) are separate fields. |
 | Request id | `X-Request-Id` is accepted (8-64 chars of `A-Za-z0-9._-`) or generated, echoed on every response, present on every log line and in every error body as `requestId`. |
@@ -1144,7 +1144,7 @@ Canceling or a no-show cancels the invoice: `canceled` (nothing paid), `canceled
 * Invoice detail and ledger rows (ADR 0171): each ledger event carries `processor` (`squarespace|square|null`) and
   `processorOrderId`, `source` may be `square`, and (wave Q3 dashapi) `receiptNumber` / `receiptUrl` for a Square payment; the
   detail carries `processing{processor, squarePosAppSwitch, squareTenders{reader, link, savedCard}}` (section 30.13).
-* Settings used: `tax.rate_dbp` (snapshotted on each invoice as `tax_dbp`, with `tax_rounding half_even`; ADR 0173), `approvals.allow_self`.
+* Settings used: `tax.rate_dbp` and `tax.rounding` (snapshotted on each invoice as `tax_dbp` and `tax_rounding`; ADR 0173), `approvals.allow_self`.
 * The invoice detail carries `taxDbp`, `taxRounding` and the deprecated `taxBp` (section 30.15).
 * Job `payments.lag-scan` (every 15 minutes) is registered in `src/platform/job-registry.ts`.
 
@@ -2429,7 +2429,7 @@ user, password or port; null for anything else and for every other row.
 | `PUT /settings/billing/link-tipping` | `{enabled, version?}` | `{enabled, version}` (`payments.link_tipping`, off by default). |
 | `PUT /settings/billing/renewal-policy` | `{graceDays 0..60, cancelDays 1..90, version?}` | `{graceDays, cancelDays, version}` (`memberships.billing_policy`, default 7 / 21); 422 `VALIDATION_FAILED` unless cancelDays > graceDays. |
 | `PUT /settings/billing/price-change-notice` | `{days 0..90, version?}` | `{days, version}` (`memberships.price_change_notice_days`, default 30). |
-| `PUT /settings/billing/sales-tax` | `{percent, version?}` | `{percent, rateDbp, label, rounding, version}` (`tax.rate_dbp`, default 7%; section 30.15). |
+| `PUT /settings/billing/sales-tax` | `{percent, rounding?, version?}` | `{percent, rateDbp, label, rounding, version}` (`tax.rate_dbp`, default 7%, and `tax.rounding`, default `half_up`; section 30.15). |
 
 Reused, not copied: `POST /integrations/square/test` (Test connection), `PUT /catalog/guest-fee` (the fee and its collect mode),
 `PUT /settings/card-fees`, `POST /integrations/square/catalog/sync` ("Sync to Square").
@@ -2453,22 +2453,27 @@ Tests: `test/square-db/dashboard-gaps.test.ts`, `test/square-db/billing-settings
 ### 30.15 Sales tax rate and rounding (ADR 0173, wave K1e)
 
 The rate is stored in thousandths of a percent ("dbp"): 7000 = 7%, 6625 = 6.625% (New Jersey), 0 to 100000. Each invoice keeps the
-rate (`tax_dbp`) and the rounding (`tax_rounding`) it was made with: `half_even`, Square's rule (sandbox check SQR-18: CalculateOrder
-rounds the tax of an order once, on its taxable subtotal, half to even), on every invoice made since ADR 0173; `half_up` on invoices
-made before (their numbers never change). The tax is rounded once on `max(items + adjustments, 0)`; tips are untaxed.
+rate (`tax_dbp`) and the rounding (`tax_rounding`) it was made with, taken from the location's `tax.rate_dbp` and `tax.rounding`.
+`tax.rounding` is `half_up` by default (the design's rule: every 7% invoice is made exactly as before) and is switched to `half_even`,
+Square's rule (sandbox check SQR-18: CalculateOrder rounds the tax of an order once, on its taxable subtotal, half to even), at the
+rollout together with 6.625%, after the dashboard twin is deployed. Invoices made before keep their rule (their numbers never
+change). The tax is rounded once on `max(items + adjustments, 0)`; tips are untaxed.
 
 | Field (invoice detail `GET /invoices/:id`, the invoice summary of operations answers) | Meaning |
 |---|---|
 | `taxDbp` | The invoice's rate in thousandths of a percent. |
-| `taxRounding` | `half_even` or `half_up`. |
+| `taxRounding` | `half_up` or `half_even`. |
 | `taxBp` | Deprecated: the rate rounded half-up to whole basis points (6.625% reads 663). Kept one release for older dashboards. |
 
-`GET /settings/billing` → `salesTax {percent: "6.625", rateDbp: 6625, label: "6.625%", rounding: "half_even", version}` (`rounding` is
-what new invoices use). `PUT /settings/billing/sales-tax {percent, version?}` (`set.billing`): `percent` is a string, the rate as staff
-type it with up to three decimals, 0 to 100 (`"7"`, `"6.625"`, `"6.625%"`); anything else is 422 `VALIDATION_FAILED` with
-`errors[0].path = "percent"` ("Use a percentage from 0 to 100 with up to three decimals, such as 6.625"). `version` (or If-Match) is
-required: 428 without, 412 when stale; audited `settings.update`, publishes `settings.changed {key: "tax.rate_dbp"}`. A new rate
-applies to invoices made from then on.
+`GET /settings/billing` → `salesTax {percent: "7", rateDbp: 7000, label: "7%", rounding: "half_up", version}` by default (`rounding`
+is `tax.rounding`, what new invoices use; `version` is the version of `tax.rate_dbp`). `PUT /settings/billing/sales-tax {percent,
+rounding?, version?}` (`set.billing`): `percent` is a string, the rate as staff type it with up to three decimals, 0 to 100 (`"7"`,
+`"6.625"`, `"6.625%"`); anything else is 422 `VALIDATION_FAILED` with `errors[0].path = "percent"` ("Use a percentage from 0 to 100
+with up to three decimals, such as 6.625"). `rounding` (`half_up` | `half_even`, anything else 422) is optional: left out, it stays as
+it is; sent and different, it is saved in the same transaction. The rate is always written, so `version` (or If-Match) guards both:
+428 without, 412 when stale (nothing saved). Audited `settings.update`, publishes `settings.changed {key: "tax.rate_dbp"}` (and
+`{key: "tax.rounding"}` when it changed). Both apply to invoices made from then on. Rollout: `{percent: "6.625", rounding:
+"half_even"}` in one save, only after the dashboard twin (`taxDbp`/`taxRounding`) is deployed.
 
 The Square payment link's tax line reads `Sales tax (6.625%)` (the invoice's own rate); its amount is the invoice's tax (a link sets no
 Square tax). Tests: `test/unit/tax-precision.test.ts` (golden vectors, including the 200 recorded sandbox answers),

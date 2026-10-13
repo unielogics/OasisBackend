@@ -4,8 +4,9 @@
 --
 -- * Rates are kept in thousandths of a percent ("dbp", tenths of a basis point): 7000 = 7%, 6625 = 6.625%, 0 to 100000.
 -- * invoices.tax_dbp replaces invoices.tax_bp (every existing row: tax_bp x 10, the same rate).
--- * invoices.tax_rounding: 'half_up' on every invoice that exists now (their numbers never change), 'half_even' on new ones (the
---   gateway writes it; the column default is the same).
+-- * invoices.tax_rounding: 'half_up' on every invoice that exists now (their numbers never change). A new invoice takes the
+--   location's setting tax.rounding (the gateway writes it): 'half_up' by default, so 7% invoices are made exactly as before;
+--   'half_even' (Square's rule) once the rollout switches it with 6.625%. The column default is 'half_up', the setting's default.
 -- * The setting tax.rate_bp becomes tax.rate_dbp (a stored value is carried over x 10, version kept; the default stays 7%).
 -- * invoice_calc_of computes the tax with sales_tax_cents (the SQL twin of salesTaxCents in src/platform/money.ts) and the net with
 --   the dbp rate; with tax_rounding 'half_up' and tax_dbp = tax_bp x 10 every column is the same as before.
@@ -33,7 +34,6 @@ alter table invoices alter column tax_dbp set not null;
 alter table invoices add constraint invoices_tax_dbp_check check (tax_dbp between 0 and 100000);
 alter table invoices add column tax_rounding text not null default 'half_up'
   constraint invoices_tax_rounding_check check (tax_rounding in ('half_up', 'half_even'));
-alter table invoices alter column tax_rounding set default 'half_even';
 
 create or replace function invoice_calc_of(p_invoice uuid)
 returns table (

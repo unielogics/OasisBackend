@@ -12,6 +12,7 @@ import {
 describe('settings registry', () => {
   it('has the design defaults', () => {
     expect(defaultSetting('tax.rate_dbp')).toBe(7000) // 7% in thousandths of a percent (ADR 0173)
+    expect(defaultSetting('tax.rounding')).toBe('half_up') // today's rule until the rollout switches to Square's (ADR 0173)
     expect(defaultSetting('currency')).toBe('USD')
     expect(defaultSetting('ops.late_grace_min')).toBe(10)
     expect(defaultSetting('ops.eta_visible_max_min')).toBe(30)
@@ -37,6 +38,8 @@ describe('settings registry', () => {
     expect(() => parseSetting('tax.rate_dbp', 6625.5)).toThrow(AppError)
     expect(() => parseSetting('tax.rate_dbp', -1)).toThrow(AppError)
     expect(parseSetting('tax.rate_dbp', 6625)).toBe(6625)
+    expect(parseSetting('tax.rounding', 'half_even')).toBe('half_even')
+    expect(() => parseSetting('tax.rounding', 'bankers')).toThrow(AppError)
     expect(() => parseSetting('sms.quiet_hours', { enabled: true, start: '9pm', end: '08:00' })).toThrow(
       AppError,
     )

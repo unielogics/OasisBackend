@@ -9,9 +9,9 @@ import {
   divHalfEven,
   divHalfUp,
   legacyTaxBp,
-  NEW_INVOICE_TAX_ROUNDING,
   parseTaxPercent,
   salesTaxCents,
+  SQUARE_TAX_ROUNDING,
   taxPercentLabel,
   type TaxRate,
 } from '../../src/platform/money.js'
@@ -87,8 +87,8 @@ describe("salesTaxCents: Square's rule at 6.625% (golden vectors from the sandbo
     expect([fourPlusFour.squareTax, ruleTax('line_half_even', 6625, fourPlusFour.lines), ruleTax('line_half_up', 6625, fourPlusFour.lines)]).toEqual([53, 52, 54])
   })
 
-  it('a new invoice rounds half to even, once on its adjusted subtotal', () => {
-    expect(NEW_INVOICE_TAX_ROUNDING).toBe('half_even')
+  it("Square's rule (set at the rollout) rounds half to even, once on the adjusted subtotal", () => {
+    expect(SQUARE_TAX_ROUNDING).toBe('half_even')
     const c = calcInvoice({ itemPrices: [2000, 3600], events: [{ type: 'adjust', amountCents: -400 }], taxDbp: 6625, taxRounding: 'half_even', tipCents: 500, canceled: false })
     expect([c.sub, c.tax, c.total]).toEqual([5200, 344, 6044])
     const old = calcInvoice({ itemPrices: [2000, 3600], events: [{ type: 'adjust', amountCents: -400 }], taxDbp: 6625, taxRounding: 'half_up', tipCents: 500, canceled: false })

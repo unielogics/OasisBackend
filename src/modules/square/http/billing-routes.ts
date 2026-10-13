@@ -7,6 +7,7 @@
 //   PUT  /settings/billing/renewal-policy               set.billing   memberships.billing_policy
 //   PUT  /settings/billing/price-change-notice          set.billing   memberships.price_change_notice_days
 //   PUT  /settings/billing/sales-tax                    set.billing   tax.rate_dbp (ADR 0173: a percentage with up to 3 decimals)
+//                                                                     and, when sent, tax.rounding (half_up default, half_even = Square's)
 // Reused: GET /integrations/square + POST /integrations/square/test (status, Test connection), PUT /catalog/guest-fee (booking fee
 // amount and collect mode, set.services), PUT /settings/card-fees (fees.card_on_file), POST /integrations/square/catalog/sync
 // ("Sync to Square"). Each block carries its own version (body `version` or If-Match on its PUT: 428 without, 412 stale); a save is
@@ -16,7 +17,7 @@ import { access } from '../../../http/access.js'
 import type { AppInstance } from '../../../http/types.js'
 import { z } from '../../../http/zod.js'
 import { AppError } from '../../../platform/errors.js'
-import { NEW_INVOICE_TAX_ROUNDING, parseTaxPercent, taxPercentLabel } from '../../../platform/money.js'
+import { parseTaxPercent, TAX_ROUNDINGS, taxPercentLabel, type TaxRounding } from '../../../platform/money.js'
 import { getSetting, updateSetting, type SettingKey } from '../../../platform/settings.js'
 import { etag, inTx, requestContext, requiredVersion, storedUserId } from '../../settings/http/runtime.js'
 import { cardsOn } from '../charges.js'
@@ -58,15 +59,17 @@ const SalesTax = z.object({
   rateDbp: z.number().int().describe('The same rate in thousandths of a percent (tax.rate_dbp): 7000 = 7%, 6625 = 6.625%'),
   label: z.string().describe('How the tax line reads it: "7%", "6.625%"'),
   rounding: z
-    .enum(['half_up', 'half_even'])
-    .describe("How new invoices round their tax, once on the subtotal: half_even, Square's rule (ADR 0173; older invoices keep half_up)"),
-  version: z.number().int(),
+    .enum(TAX_ROUNDINGS)
+    .describe(
+      "tax.rounding: how new invoices round their tax, once on the subtotal: half_up (the default, the design's rule) or half_even (Square's rule, set at the rollout with 6.625%; ADR 0173). Each invoice keeps the rule it was made with",
+    ),
+  version: z.number().int().describe('The version of tax.rate_dbp: every save of this block writes the rate, so it covers the rounding too'),
 })
 
 /** The Sales tax block of Settings → Billing & integrations (ADR 0173). */
-export function salesTaxView(rec: { value: number; version: number }): z.infer<typeof SalesTax> {
-  const label = taxPercentLabel(rec.value)
-  return { percent: label.slice(0, -1), rateDbp: rec.value, label, rounding: NEW_INVOICE_TAX_ROUNDING, version: rec.version }
+export function salesTaxView(rate: { value: number; version: number }, rounding: TaxRounding): z.infer<typeof SalesTax> {
+  const label = taxPercentLabel(rate.value)
+  return { percent: label.slice(0, -1), rateDbp: rate.value, label, rounding, version: rate.version }
 }
 
 export const BillingSettingsView = z.object({
@@ -85,7 +88,7 @@ export const BillingSettingsView = z.object({
     .describe('fees.card_on_file: PUT /settings/card-fees'),
   renewalPolicy: RenewalPolicy.describe('memberships.billing_policy: PUT /settings/billing/renewal-policy'),
   priceChangeNotice: PriceNotice.describe('memberships.price_change_notice_days: PUT /settings/billing/price-change-notice'),
-  salesTax: SalesTax.describe('tax.rate_dbp: PUT /settings/billing/sales-tax (applies to invoices made from then on)'),
+  salesTax: SalesTax.describe('tax.rate_dbp and tax.rounding: PUT /settings/billing/sales-tax (applies to invoices made from then on)'),
   consent: z
     .object({
       version: z.string().describe('The card consent text version every new card is saved under'),
@@ -128,7 +131,7 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
     async (req) => {
       const { locationId } = requestContext(req)
       const env = squareEnv()
-      const [square, fee, tipping, fees, policy, notice, tax] = await Promise.all([
+      const [square, fee, tipping, fees, policy, notice, tax, rounding] = await Promise.all([
         squareIntegrationView(app, locationId),
         getSetting(app.db, locationId, 'booking.guest_fee'),
         getSetting(app.db, locationId, 'payments.link_tipping'),
@@ -136,6 +139,7 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
         getSetting(app.db, locationId, 'memberships.billing_policy'),
         getSetting(app.db, locationId, 'memberships.price_change_notice_days'),
         getSetting(app.db, locationId, 'tax.rate_dbp'),
+        getSetting(app.db, locationId, 'tax.rounding'),
       ])
       return {
         square,
@@ -155,7 +159,7 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
         cardFees: { fees: fees.value, version: fees.version, active: fees.value.enabled && cardsOn(env) },
         renewalPolicy: { ...policy.value, version: policy.version },
         priceChangeNotice: { days: notice.value, version: notice.version },
-        salesTax: salesTaxView(tax),
+        salesTax: salesTaxView(tax, rounding.value),
         consent: {
           version: CURRENT_CONSENT_VERSION,
           checkedByDefault: CONSENT_CHECKED_BY_DEFAULT,
@@ -240,24 +244,34 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
       schema: {
         tags: TAGS,
         operationId: 'putBillingSalesTax',
-        summary: 'Save the sales tax rate of new invoices (ETag = version)',
+        summary: 'Save the sales tax rate (and, when sent, the rounding) of new invoices (ETag = version)',
         description:
-          'tax.rate_dbp (ADR 0173; default 7%). `percent` is the rate as staff type it, with up to three decimals ("6.625" for New Jersey; a trailing % is accepted), 0 to 100; anything else is 422 `VALIDATION_FAILED` on `percent`. It applies to invoices made from now on: each invoice keeps the rate and the rounding it was made with, and every new invoice rounds its tax like Square (half to even, once on the subtotal). `version` (or If-Match) required: 428 without, 412 when stale. Audited `settings.update`; publishes `settings.changed {key: "tax.rate_dbp"}`.',
-        body: z.object({ percent: z.string().max(12), version: Version.optional() }).strict(),
+          'tax.rate_dbp (ADR 0173; default 7%). `percent` is the rate as staff type it, with up to three decimals ("6.625" for New Jersey; a trailing % is accepted), 0 to 100; anything else is 422 `VALIDATION_FAILED` on `percent`. `rounding` (optional; tax.rounding, default `half_up`): `half_even` makes new invoices round their tax like Square (half to even, once on the subtotal), set at the rollout together with 6.625%; left out, the rounding stays as it is. Both apply to invoices made from now on: each invoice keeps the rate and the rounding it was made with. `version` (or If-Match, the version of tax.rate_dbp) required: 428 without, 412 when stale; the rate and the rounding are saved together or not at all. Audited `settings.update`; publishes `settings.changed {key: "tax.rate_dbp"}` (and `{key: "tax.rounding"}` when the rounding changes).',
+        body: z.object({ percent: z.string().max(12), rounding: z.enum(TAX_ROUNDINGS).optional(), version: Version.optional() }).strict(),
         response: { 200: SalesTax },
       },
     },
     async (req, reply) => {
-      const b = req.body as { percent: string; version?: number }
+      const b = req.body as { percent: string; rounding?: TaxRounding; version?: number }
       const dbp = parseTaxPercent(b.percent)
       if (dbp === null)
         throw new AppError('VALIDATION_FAILED', {
           detail: 'Enter the tax rate as a percentage, such as 6.625',
           errors: [{ path: 'percent', message: 'Use a percentage from 0 to 100 with up to three decimals, such as 6.625' }],
         })
-      const r = await save(req, 'tax.rate_dbp', dbp, b.version)
-      etag(reply, r.version)
-      return salesTaxView(r)
+      const c = requestContext(req)
+      const v = requiredVersion(req, b.version)
+      const out = await inTx(app.db, async (tx) => {
+        const updatedBy = await storedUserId(tx, c.userId)
+        // the rate is always written (its version guards the whole block); the rounding only when it is sent and differs
+        const rate = await updateSetting(tx, { locationId: c.locationId, key: 'tax.rate_dbp', value: dbp, expectedVersion: v, updatedBy, audit: c.audit })
+        let rounding = (await getSetting(tx, c.locationId, 'tax.rounding')).value
+        if (b.rounding !== undefined && b.rounding !== rounding)
+          rounding = (await updateSetting(tx, { locationId: c.locationId, key: 'tax.rounding', value: b.rounding, updatedBy, audit: c.audit })).value
+        return salesTaxView(rate, rounding)
+      })
+      etag(reply, out.version)
+      return out
     },
   )
 }

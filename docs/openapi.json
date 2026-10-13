@@ -13519,7 +13519,7 @@
                               "type": "integer"
                             },
                             "taxRounding": {
-                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                               "enum": [
                                 "half_up",
                                 "half_even"
@@ -14872,7 +14872,7 @@
                               "type": "integer"
                             },
                             "taxRounding": {
-                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                               "enum": [
                                 "half_up",
                                 "half_even"
@@ -16761,7 +16761,7 @@
                           "type": "integer"
                         },
                         "taxRounding": {
-                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                           "enum": [
                             "half_up",
                             "half_even"
@@ -49278,7 +49278,7 @@
                       "type": "integer"
                     },
                     "taxRounding": {
-                      "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                      "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                       "enum": [
                         "half_up",
                         "half_even"
@@ -50884,7 +50884,7 @@
                           "type": "integer"
                         },
                         "taxRounding": {
-                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                           "enum": [
                             "half_up",
                             "half_even"
@@ -52936,7 +52936,7 @@
                               "type": "integer"
                             },
                             "taxRounding": {
-                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                               "enum": [
                                 "half_up",
                                 "half_even"
@@ -54289,7 +54289,7 @@
                               "type": "integer"
                             },
                             "taxRounding": {
-                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                               "enum": [
                                 "half_up",
                                 "half_even"
@@ -55689,7 +55689,7 @@
                               "type": "integer"
                             },
                             "taxRounding": {
-                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                               "enum": [
                                 "half_up",
                                 "half_even"
@@ -57259,7 +57259,7 @@
                           "type": "integer"
                         },
                         "taxRounding": {
-                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                           "enum": [
                             "half_up",
                             "half_even"
@@ -58862,7 +58862,7 @@
                           "type": "integer"
                         },
                         "taxRounding": {
-                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                           "enum": [
                             "half_up",
                             "half_even"
@@ -60056,7 +60056,7 @@
                           "type": "integer"
                         },
                         "taxRounding": {
-                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                           "enum": [
                             "half_up",
                             "half_even"
@@ -61691,7 +61691,7 @@
                           "type": "integer"
                         },
                         "taxRounding": {
-                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                           "enum": [
                             "half_up",
                             "half_even"
@@ -62917,7 +62917,7 @@
                           "type": "integer"
                         },
                         "taxRounding": {
-                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                           "enum": [
                             "half_up",
                             "half_even"
@@ -64538,7 +64538,7 @@
                           "type": "integer"
                         },
                         "taxRounding": {
-                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                           "enum": [
                             "half_up",
                             "half_even"
@@ -66114,7 +66114,7 @@
                           "type": "integer"
                         },
                         "taxRounding": {
-                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                           "enum": [
                             "half_up",
                             "half_even"
@@ -67701,7 +67701,7 @@
                           "type": "integer"
                         },
                         "taxRounding": {
-                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                           "enum": [
                             "half_up",
                             "half_even"
@@ -68922,7 +68922,7 @@
                           "type": "integer"
                         },
                         "taxRounding": {
-                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                           "enum": [
                             "half_up",
                             "half_even"
@@ -70103,7 +70103,7 @@
                           "type": "integer"
                         },
                         "taxRounding": {
-                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                           "enum": [
                             "half_up",
                             "half_even"
@@ -71687,7 +71687,7 @@
                           "type": "integer"
                         },
                         "taxRounding": {
-                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                           "enum": [
                             "half_up",
                             "half_even"
@@ -73496,7 +73496,7 @@
                           "type": "integer"
                         },
                         "taxRounding": {
-                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                           "enum": [
                             "half_up",
                             "half_even"
@@ -97342,7 +97342,7 @@
                               "type": "integer"
                             },
                             "taxRounding": {
-                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                               "enum": [
                                 "half_up",
                                 "half_even"
@@ -98580,7 +98580,7 @@
                               "type": "integer"
                             },
                             "taxRounding": {
-                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                               "enum": [
                                 "half_up",
                                 "half_even"
@@ -99803,7 +99803,7 @@
                               "type": "integer"
                             },
                             "taxRounding": {
-                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_up (the design's rule, the default) or half_even (Square's rule, once the location's tax.rounding is switched; ADR 0173)",
                               "enum": [
                                 "half_up",
                                 "half_even"
@@ -111594,7 +111594,7 @@
                     },
                     "salesTax": {
                       "additionalProperties": false,
-                      "description": "tax.rate_dbp: PUT /settings/billing/sales-tax (applies to invoices made from then on)",
+                      "description": "tax.rate_dbp and tax.rounding: PUT /settings/billing/sales-tax (applies to invoices made from then on)",
                       "properties": {
                         "label": {
                           "description": "How the tax line reads it: \"7%\", \"6.625%\"",
@@ -111611,7 +111611,7 @@
                           "type": "integer"
                         },
                         "rounding": {
-                          "description": "How new invoices round their tax, once on the subtotal: half_even, Square's rule (ADR 0173; older invoices keep half_up)",
+                          "description": "tax.rounding: how new invoices round their tax, once on the subtotal: half_up (the default, the design's rule) or half_even (Square's rule, set at the rollout with 6.625%; ADR 0173). Each invoice keeps the rule it was made with",
                           "enum": [
                             "half_up",
                             "half_even"
@@ -111619,6 +111619,7 @@
                           "type": "string"
                         },
                         "version": {
+                          "description": "The version of tax.rate_dbp: every save of this block writes the rate, so it covers the rounding too",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
@@ -112199,7 +112200,7 @@
     },
     "/api/v1/settings/billing/sales-tax": {
       "put": {
-        "description": "tax.rate_dbp (ADR 0173; default 7%). `percent` is the rate as staff type it, with up to three decimals (\"6.625\" for New Jersey; a trailing % is accepted), 0 to 100; anything else is 422 `VALIDATION_FAILED` on `percent`. It applies to invoices made from now on: each invoice keeps the rate and the rounding it was made with, and every new invoice rounds its tax like Square (half to even, once on the subtotal). `version` (or If-Match) required: 428 without, 412 when stale. Audited `settings.update`; publishes `settings.changed {key: \"tax.rate_dbp\"}`.",
+        "description": "tax.rate_dbp (ADR 0173; default 7%). `percent` is the rate as staff type it, with up to three decimals (\"6.625\" for New Jersey; a trailing % is accepted), 0 to 100; anything else is 422 `VALIDATION_FAILED` on `percent`. `rounding` (optional; tax.rounding, default `half_up`): `half_even` makes new invoices round their tax like Square (half to even, once on the subtotal), set at the rollout together with 6.625%; left out, the rounding stays as it is. Both apply to invoices made from now on: each invoice keeps the rate and the rounding it was made with. `version` (or If-Match, the version of tax.rate_dbp) required: 428 without, 412 when stale; the rate and the rounding are saved together or not at all. Audited `settings.update`; publishes `settings.changed {key: \"tax.rate_dbp\"}` (and `{key: \"tax.rounding\"}` when the rounding changes).",
         "operationId": "putBillingSalesTax",
         "requestBody": {
           "content": {
@@ -112209,6 +112210,13 @@
                 "properties": {
                   "percent": {
                     "maxLength": 12,
+                    "type": "string"
+                  },
+                  "rounding": {
+                    "enum": [
+                      "half_up",
+                      "half_even"
+                    ],
                     "type": "string"
                   },
                   "version": {
@@ -112248,7 +112256,7 @@
                       "type": "integer"
                     },
                     "rounding": {
-                      "description": "How new invoices round their tax, once on the subtotal: half_even, Square's rule (ADR 0173; older invoices keep half_up)",
+                      "description": "tax.rounding: how new invoices round their tax, once on the subtotal: half_up (the default, the design's rule) or half_even (Square's rule, set at the rollout with 6.625%; ADR 0173). Each invoice keeps the rule it was made with",
                       "enum": [
                         "half_up",
                         "half_even"
@@ -112256,6 +112264,7 @@
                       "type": "string"
                     },
                     "version": {
+                      "description": "The version of tax.rate_dbp: every save of this block writes the rate, so it covers the rounding too",
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
@@ -112275,7 +112284,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Save the sales tax rate of new invoices (ETag = version)",
+        "summary": "Save the sales tax rate (and, when sent, the rounding) of new invoices (ETag = version)",
         "tags": [
           "settings"
         ],

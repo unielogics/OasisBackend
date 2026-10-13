@@ -10,7 +10,7 @@ import type { SquareClient } from '../../src/integrations/square/client.js'
 import type { SquareApi } from '../../src/integrations/ports/square.js'
 import { sqKey } from '../../src/integrations/square/keys.js'
 import { centsOf, usd } from '../../src/integrations/square/money.js'
-import { NEW_INVOICE_TAX_ROUNDING, salesTaxCents } from '../../src/platform/money.js'
+import { SQUARE_TAX_ROUNDING, salesTaxCents } from '../../src/platform/money.js'
 import type { Report } from './lib.js'
 
 /** A rate in 1/1000 basis points: 6625 = 6.625%, 7000 = 7%. */
@@ -260,7 +260,7 @@ export function resultTable(obs: readonly TaxObservation[]): string[] {
 
 /** Oasis's rule for a new invoice with the same lines: the tax of the subtotal, rounded once (salesTaxCents, ADR 0173). */
 export const oasisTax = (o: TaxCase): number =>
-  salesTaxCents(o.lines.reduce((s, l) => s + l.unitCents * l.qty, 0) - (o.discount?.cents ?? 0), { dbp: o.rateDbp, rounding: NEW_INVOICE_TAX_ROUNDING })
+  salesTaxCents(o.lines.reduce((s, l) => s + l.unitCents * l.qty, 0) - (o.discount?.cents ?? 0), { dbp: o.rateDbp, rounding: SQUARE_TAX_ROUNDING })
 
 export async function sqr18(
   o: { api: SquareApi; client: SquareClient; report: Report; run: string; ref: string; locationId: string; cleanup: Array<{ what: string; run: () => Promise<unknown> }> },

@@ -11,7 +11,7 @@ import { AppError } from '../../platform/errors.js'
 import type { NewId } from '../../platform/ids.js'
 import * as realtime from '../../platform/realtime.js'
 import { getSetting } from '../../platform/settings.js'
-import { legacyTaxBp, NEW_INVOICE_TAX_ROUNDING, type TaxRounding } from '../../platform/money.js'
+import { legacyTaxBp, type TaxRounding } from '../../platform/money.js'
 import { toBizDate } from '../../platform/time.js'
 import { calcInvoice, type CalcEvent, type InvoiceCalc } from './calc.js'
 import { invoiceLabel } from './format.js'
@@ -44,7 +44,7 @@ export interface InvoiceSummary {
   taxBp: number
   /** The rate snapshotted on the invoice in thousandths of a percent (7000 = 7%, 6625 = 6.625%; ADR 0173). */
   taxDbp: number
-  /** How the invoice's tax is rounded: half_up (invoices made before ADR 0173) or half_even (Square's rule, every new one). */
+  /** How the invoice's tax is rounded (the location's tax.rounding when it was made): half_up (default) or half_even (Square's rule). */
   taxRounding: TaxRounding
   items: SummaryItem[]
   payMethodLabel: string | null
@@ -385,6 +385,7 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
         return summaryOf(tx, a.appointmentId)
       }
       const taxDbp = (await getSetting(tx, a.locationId, 'tax.rate_dbp')).value
+      const taxRounding = (await getSetting(tx, a.locationId, 'tax.rounding')).value
       const invoiceNo = await nextInvoiceNo(tx, a.locationId)
       const id = d.newId()
       await tx
@@ -401,8 +402,8 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
           occurred_at: a.occurredAt,
           biz_date: toBizDate(a.occurredAt, tz),
           tax_dbp: taxDbp,
-          // ADR 0173: every new invoice rounds its tax like Square (half to even, once on the subtotal)
-          tax_rounding: NEW_INVOICE_TAX_ROUNDING,
+          // ADR 0173: the location's rounding (half_up by default; half_even, Square's rule, once the rollout sets it)
+          tax_rounding: taxRounding,
           vehicle_class_label: a.vehicleClassLabel ?? null,
         })
         .execute()

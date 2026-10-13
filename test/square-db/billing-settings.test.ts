@@ -120,9 +120,9 @@ describe('the writes', () => {
 })
 
 describe('the sales tax rate (ADR 0173)', () => {
-  it('reads 7% by default, rounded like Square on new invoices', async () => {
+  it('reads 7% rounded half-up by default: new invoices are made exactly as today', async () => {
     defaults()
-    expect((await panel()).salesTax).toEqual({ percent: '7', rateDbp: 7000, label: '7%', rounding: 'half_even', version: expect.any(Number) })
+    expect((await panel()).salesTax).toEqual({ percent: '7', rateDbp: 7000, label: '7%', rounding: 'half_up', version: expect.any(Number) })
   })
 
   it('saves a percentage with up to three decimals (6.625 for New Jersey): version required, audited, settings.changed', async () => {
@@ -131,7 +131,7 @@ describe('the sales tax rate (ADR 0173)', () => {
     expect((await put('sales-tax', { percent: '6.625' })).statusCode).toBe(428)
     const ok = await put('sales-tax', { percent: '6.625', version: v })
     expect(ok.statusCode, ok.body).toBe(200)
-    expect(ok.json()).toEqual({ percent: '6.625', rateDbp: 6625, label: '6.625%', rounding: 'half_even', version: v + 1 })
+    expect(ok.json()).toEqual({ percent: '6.625', rateDbp: 6625, label: '6.625%', rounding: 'half_up', version: v + 1 })
     expect(ok.headers.etag).toBe(`"${v + 1}"`)
     expect((await put('sales-tax', { percent: '7', version: v })).statusCode).toBe(412)
     expect((await panel()).salesTax).toMatchObject({ percent: '6.625', rateDbp: 6625 })
@@ -139,6 +139,31 @@ describe('the sales tax rate (ADR 0173)', () => {
     expect((await audits('tax.rate_dbp')).map((a) => [a.before, a.after])).toEqual([[7000, 6625]])
     const back = await put('sales-tax', { percent: '7.000%', version: v + 1 })
     expect(back.json()).toMatchObject({ percent: '7', rateDbp: 7000, label: '7%' })
+    // the rounding was never sent, so it was never written
+    expect(await audits('tax.rounding')).toEqual([])
+  })
+
+  it("switches new invoices to Square's rounding only when asked (rounding: half_even), in the same save as the rate", async () => {
+    defaults()
+    const v = (await panel()).salesTax.version as number
+    const ok = await put('sales-tax', { percent: '6.625', rounding: 'half_even', version: v })
+    expect(ok.statusCode, ok.body).toBe(200)
+    expect(ok.json()).toEqual({ percent: '6.625', rateDbp: 6625, label: '6.625%', rounding: 'half_even', version: v + 1 })
+    expect((await panel()).salesTax).toMatchObject({ rounding: 'half_even', version: v + 1 })
+    expect((await audits('tax.rounding')).map((a) => [a.before, a.after])).toEqual([['half_up', 'half_even']])
+    expect(await changed('tax.rounding')).toHaveLength(1)
+    // a later save of the rate alone keeps the rounding; sending the same rounding again writes nothing
+    const again = await put('sales-tax', { percent: '6.625', rounding: 'half_even', version: v + 1 })
+    expect(again.json()).toMatchObject({ rounding: 'half_even', version: v + 2 })
+    expect((await put('sales-tax', { percent: '7', version: v + 2 })).json()).toMatchObject({ rateDbp: 7000, rounding: 'half_even' })
+    expect(await audits('tax.rounding')).toHaveLength(1)
+    // a stale save changes neither the rate nor the rounding
+    expect((await put('sales-tax', { percent: '5', rounding: 'half_up', version: v })).statusCode).toBe(412)
+    expect((await panel()).salesTax).toMatchObject({ rateDbp: 7000, rounding: 'half_even', version: v + 3 })
+    // the rounding is one of two words
+    const bad = await put('sales-tax', { percent: '7', rounding: 'bankers', version: v + 3 })
+    expect(bad.statusCode).toBe(422)
+    expect((await panel()).salesTax.version).toBe(v + 3)
   })
 
   it('refuses anything that is not 0 to 100 with up to three decimals, on the percent field, with a plain message', async () => {

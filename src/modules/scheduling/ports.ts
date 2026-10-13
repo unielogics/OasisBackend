@@ -4,7 +4,7 @@
 import { appError } from '../../platform/errors.js'
 import type { AuditActor, AuditContext } from '../../platform/audit.js'
 import type { Executor, Tx } from '../../platform/db.js'
-import { NEW_INVOICE_TAX_ROUNDING, salesTaxCents, type TaxRate, type TaxRounding } from '../../platform/money.js'
+import { salesTaxCents, type TaxRate, type TaxRounding } from '../../platform/money.js'
 import type { StorageProvider } from '../../integrations/ports/storage.js'
 import { renderTemplate, type TemplateVars } from '../messaging/templates/render.js'
 import { QUICK_REPLIES } from '../messaging/templates/registry.js'
@@ -81,7 +81,7 @@ export interface InvoiceSummary {
   taxBp?: number
   /** The invoice's own tax rate in thousandths of a percent (7000 = 7%, 6625 = 6.625%); absent = the location default. */
   taxDbp?: number
-  /** How the invoice's tax is rounded (half_even since ADR 0173, half_up before); absent = half_even. */
+  /** How the invoice's tax is rounded (ADR 0173: the location's tax.rounding when it was made, half_up by default); absent = half_up. */
   taxRounding?: TaxRounding
   items: InvoiceItem[]
   payMethodLabel: string | null
@@ -214,15 +214,15 @@ interface MemInvoice {
 
 const sum = (xs: readonly number[]): number => xs.reduce((a, b) => a + b, 0)
 
-/** In-memory InvoiceGateway for tests and local wiring: 7% tax rounded like a new invoice (half to even), numbering from 20611. */
+/** In-memory InvoiceGateway for tests and local wiring: 7% tax rounded half-up (the setting defaults), numbering from 20611. */
 export class InMemoryInvoiceGateway implements InvoiceGateway {
   private readonly byAppointment = new Map<string, MemInvoice>()
   private readonly counters = new Map<string, number>()
   readonly calls: { method: string; appointmentId: string }[] = []
   readonly rate: TaxRate
 
-  constructor(o: { taxDbp?: number } = {}) {
-    this.rate = { dbp: o.taxDbp ?? TAX_RATE_DBP, rounding: NEW_INVOICE_TAX_ROUNDING }
+  constructor(o: { taxDbp?: number; taxRounding?: TaxRounding } = {}) {
+    this.rate = { dbp: o.taxDbp ?? TAX_RATE_DBP, rounding: o.taxRounding ?? 'half_up' }
   }
 
   private nextNo(locationId: string): number {

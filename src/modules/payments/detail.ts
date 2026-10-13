@@ -159,7 +159,7 @@ export interface InvoiceDetail {
   taxBp: number
   /** The invoice's rate in thousandths of a percent (7000 = 7%, 6625 = 6.625%). */
   taxDbp: number
-  /** half_up (made before ADR 0173) or half_even (Square's rule). */
+  /** The location's tax.rounding when the invoice was made: half_up (the default) or half_even (Square's rule; ADR 0173). */
   taxRounding: TaxRounding
   tipCents: number
   paymentLinkUrl: string | null

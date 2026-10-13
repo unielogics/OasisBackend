@@ -1,6 +1,6 @@
 // Integer cents only. This is the only module that does money arithmetic or formatting.
-// Rounding is half-up (toward +infinity on exact halves) in integer math, except sales tax on invoices made since ADR 0173
-// (half to even, Square's rule); floats never touch a cent value.
+// Rounding is half-up (toward +infinity on exact halves) in integer math, except sales tax on an invoice whose tax_rounding is
+// half_even (Square's rule, ADR 0173); floats never touch a cent value.
 
 export const MAX_MONEY_CENTS = 1_000_000_000_000 // $10 billion, far below 2^53 so sums stay exact
 
@@ -32,13 +32,13 @@ export function divHalfEven(n: number, d: number): number {
 /**
  * Sales tax (ADR 0173). The rate is in thousandths of a percent ("dbp", tenths of a basis point): 7000 = 7%, 6625 = 6.625%; an
  * invoice keeps its own rate and its own rounding rule. Square (CalculateOrder, sandbox check SQR-18) rounds the tax of an order
- * ONCE on its taxable subtotal, half to even; invoices made before ADR 0173 round half-up (the design's rule), so their numbers
- * never change.
+ * ONCE on its taxable subtotal, half to even. A new invoice takes the location's setting tax.rounding: half_up by default (the
+ * design's rule, so today's 7% numbers never change), half_even once the rollout switches it together with 6.625%.
  */
 export type TaxRounding = 'half_up' | 'half_even'
-export const TAX_ROUNDINGS: readonly TaxRounding[] = ['half_up', 'half_even']
-/** What a new invoice rounds with: Square's rule. */
-export const NEW_INVOICE_TAX_ROUNDING: TaxRounding = 'half_even'
+export const TAX_ROUNDINGS = ['half_up', 'half_even'] as const satisfies readonly TaxRounding[]
+/** Square's rule (SQR-18): what tax.rounding is set to at the rollout, so Oasis's tax equals Square's to the cent. */
+export const SQUARE_TAX_ROUNDING: TaxRounding = 'half_even'
 /** 100% in dbp: a rate is 0 to 100000 (0% to 100%). */
 export const TAX_DBP_PER_100_PERCENT = 100_000
 
