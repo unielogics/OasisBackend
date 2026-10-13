@@ -23,6 +23,7 @@ import { expectedVersion, inTx, storedUserId } from '../../settings/http/runtime
 import {
   completeDocument,
   deleteDocument,
+  DOCUMENT_ERROR_TEXT,
   documentFileUrl,
   EXTRACT_JOB,
   listDocuments,
@@ -290,7 +291,7 @@ export function registerKnowledgeRoutes(app: AppInstance, storage: () => ObjectS
         await removeObject(app.db, storage(), { documentId: req.params.id, key: r.objectKey, now: app.clock.now() })
         throw new AppError('DUPLICATE_DOCUMENT', { meta: { documentId: r.documentId, entryId: r.entryId } })
       }
-      if (r.status === 'failed') return reply.status(200).send({ status: 'failed', errorCode: r.errorCode, error: 'This file is not a PDF.' })
+      if (r.status === 'failed') return reply.status(200).send({ status: 'failed', errorCode: r.errorCode, error: DOCUMENT_ERROR_TEXT[r.errorCode] })
       await kick(req.params.id)
       return reply.status(202).send({ status: 'extracting' })
     },

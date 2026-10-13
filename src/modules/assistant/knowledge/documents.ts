@@ -154,7 +154,7 @@ export async function presignDocument(
     maxBytes: MAX_KNOWLEDGE_BYTES,
     ttlSec: UPLOAD_TTL_SEC,
     allowedTypes: KNOWLEDGE_TYPES,
-  } as Parameters<StorageProvider['createUpload']>[0])
+  })
   return { documentId: id, upload }
 }
 
