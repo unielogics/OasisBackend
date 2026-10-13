@@ -256,6 +256,16 @@ describe('Square jobs', () => {
     const failedAt = r.sim.store.events.find((e) => e.type === 'payment.created')!.created_at
     expect((await getSquareState(t.db, r.location.id))?.watermark?.toISOString()).toBe(failedAt)
     fail = false
+    const failedRows = () => t.db.selectFrom('webhook_log').select(['external_id', 'attempts']).where('status', '=', 'failed').orderBy('external_id').execute()
+    const failed = await failedRows()
+    expect(failed.length).toBeGreaterThan(0)
+    // at once: the failed rows wait their back-off (10 minutes after the failure; review Q4 SQ-SEM-5-R1), untried, and still hold the
+    // watermark
+    await runSquareCatchup(r.d)
+    expect(await failedRows()).toEqual(failed)
+    expect((await getSquareState(t.db, r.location.id))?.watermark?.toISOString()).toBe(failedAt)
+    // the next run of the job, 10 minutes later, runs it
+    r.clock.advance(10 * 60_000)
     const second = await runSquareCatchup(r.d)
     expect(second.failed).toBe(0)
     const rows = await t.db.selectFrom('webhook_log').select('status').where('provider', '=', 'square').execute()

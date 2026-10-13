@@ -1,6 +1,7 @@
-// Gap 3a: a credit rule can apply itself. membership_inclusions.auto_apply (false on the design's tiers, ADR 0170) and the member's own autoApply flag
-// (either one is enough) make completing a covered visit redeem one credit through the payments command layer: exactly once, a
-// system adjust on the invoice, a redeem event on the credit ledger and a line in the activity log. Nothing applies by default.
+// Gap 3a: a credit rule can apply itself. membership_inclusions.auto_apply (on by default since sandbox run F1, plan decision 2) and
+// the member's own autoApply flag (either one is enough) make completing a covered visit redeem one credit through the payments command
+// layer: exactly once, a system adjust on the invoice, a redeem event on the credit ledger and a line in the activity log. A rule set
+// to staff applies, for a member without the flag, applies nothing by itself.
 import { describe, expect, it } from 'vitest'
 import {
   activityOf,
@@ -24,8 +25,9 @@ const calc = (m: ReturnType<typeof useRig>, invoiceId: string) =>
 describe('membership credit auto-apply', () => {
   const m = useRig()
 
-  it('is off by default: completing a covered visit consumes nothing and leaves the full balance', async () => {
+  it('a rule set to staff applies: completing a covered visit consumes nothing and leaves the full balance', async () => {
     const mem = await m.member('Maria Delgado', 'essential')
+    await setRuleAutoApply(m, 'essential', 'Express wash', false)
     const a = await m.book('Maria Delgado', 'Express Hand Wash', TODAY)
     const before = await calc(m, a.invoiceId)
     await completeAs(m, a.appointmentId)
@@ -159,21 +161,22 @@ describe('membership credit auto-apply', () => {
       plans: { key: string; rules: { id: string; label: string; autoApply: boolean }[] }[]
     }
     expect(view.plans.map((p) => p.key)).toEqual(['essential', 'gold', 'vip', 'exotic'])
-    expect(view.plans.flatMap((p) => p.rules).every((r) => r.autoApply === false)).toBe(true)
+    // the default tiers' rules apply by themselves (plan decision 2, sandbox run F1)
+    expect(view.plans.flatMap((p) => p.rules).every((r) => r.autoApply === true)).toBe(true)
     const rule = view.plans[0]!.rules[0]!
     expect(
-      (await m.send(m.noMember(), 'PATCH', `/membership-plans/rules/${rule.id}`, { autoApply: true }, false))
+      (await m.send(m.noMember(), 'PATCH', `/membership-plans/rules/${rule.id}`, { autoApply: false }, false))
         .statusCode,
     ).toBe(403)
     const ok = await m.send(
       m.limited(),
       'PATCH',
       `/membership-plans/rules/${rule.id}`,
-      { autoApply: true },
+      { autoApply: false },
       false,
     )
     expect(ok.statusCode, ok.body).toBe(200)
-    expect(ok.json()).toMatchObject({ id: rule.id, autoApply: true })
+    expect(ok.json()).toMatchObject({ id: rule.id, autoApply: false })
     expect(
       (
         await m.send(

@@ -180,7 +180,8 @@ describe('the pricing migrations on top of existing data', () => {
         select id, plan_id, label, mode, per_cycle, auto_apply from membership_inclusions order by id`.execute(db)
       expect(inc.rows).toEqual([
         { id: rule(1), plan_id: plan(2), label: 'Premium wash', mode: 'per_cycle', per_cycle: 2, auto_apply: true },
-        { id: rule(2), plan_id: plan(3), label: 'Express wash', mode: 'per_cycle', per_cycle: null, auto_apply: false },
+        // copied off, then turned on by 20261015100100_review_q4_fix.sql: nobody edited it (sandbox run F1)
+        { id: rule(2), plan_id: plan(3), label: 'Express wash', mode: 'per_cycle', per_cycle: null, auto_apply: true },
       ])
       const covers = await sql<{ inclusion_id: string; service_id: string }>`
         select inclusion_id, service_id from membership_inclusion_services order by inclusion_id, service_id`.execute(db)

@@ -425,8 +425,9 @@ Migration `20261015100100_review_q4_fix.sql`:
 - **SQ-SEM-5-R1, the rescue's budgets and back-off.** The catch-up's rescue outside its window takes up to 50 lost rows (still
   `received` after 15 minutes, oldest first) and, separately, up to 50 failed rows (least recently tried first), so rows that keep
   failing never starve a lost one. A failed row is tried again only after its back-off: 10 minutes after its last failure, doubling
-  with `webhook_log.attempts` (counted by every failure; existing failed rows start at 1), at most a day; the search window skips a
-  failed row that is not due yet (the rescue takes it up once it is).
+  with `webhook_log.attempts` (counted by every failure; existing failed rows start at 1), at most a day. The search window skips a
+  failed row that is not due yet; it still holds the watermark back like a failure, so the 27-day alert still fires on an event that
+  never succeeds.
 - **SANDBOX-F2, history before the connection.** Both sandbox runs found 72 and 78 payments made before the run in "Square payments to
   match": the first catch-up reads the last day of events (the reconcile 72 hours). The first successful Test connection of a stack
   that has not read events yet stamps `square_state.connected_at` (reset with the environment, like every learned column); a counter

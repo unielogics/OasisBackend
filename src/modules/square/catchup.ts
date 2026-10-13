@@ -145,9 +145,12 @@ export async function runSquareCatchup(d: SquareEventDeps, o: { force?: boolean 
           // (a lost job), is run again here
           const row = await log.get(e.event_id)
           const lost = row?.status === 'received' && now.getTime() - row.received_at.getTime() > STUCK_MS
-          // a failed row waits its back-off (SQ-SEM-5-R1); the rescue takes it up once due, wherever the window is then
-          const due = row?.status === 'failed' && failedDue(row, now)
-          if (!due && !lost) continue
+          // a failed row waits its back-off (SQ-SEM-5-R1), and holds the watermark back meanwhile as a failure does
+          if (row?.status === 'failed' && !failedDue(row, now)) {
+            if (!Number.isNaN(at.getTime()) && (!earliestFailed || at < earliestFailed)) earliestFailed = at
+            continue
+          }
+          if (row?.status !== 'failed' && !lost) continue
         }
         try {
           const out = await processLoggedEvent(d, e.event_id)

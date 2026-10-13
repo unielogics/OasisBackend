@@ -2,6 +2,7 @@
 // layer, exempt from the actor's adjust limit), the real MembershipPort and the Operations alert that points at it.
 import { describe, expect, it } from 'vitest'
 import { dbMembershipPort } from '../../src/modules/memberships/port.js'
+import { setRuleAutoApply } from '../scheduling-gaps/support.js'
 import { key, useMemRig } from './harness.js'
 
 interface Applied {
@@ -291,6 +292,8 @@ describe('membership credits', () => {
 
   it('alert 9 points at an unused credit on a completed, unpaid job, and the file carries the membership tab data', async () => {
     await m.member('Priya Nair', 'premium')
+    // an inclusion left to staff ("Apply credit"); by default inclusions apply by themselves at completion (sandbox run F1)
+    await setRuleAutoApply(m, 'premium', 'Premium wash', false)
     const a = await m.book('Priya Nair', 'Premium Hand Wash + Interior')
     await m.complete(a.appointmentId)
     const alerts = await m.get(m.superS(), '/ops/alerts')

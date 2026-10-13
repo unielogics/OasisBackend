@@ -78,6 +78,7 @@ describe('loadMemberContext and MembershipPort.pricingFor', () => {
       tierKey: 'gold',
       tierName: 'Gold',
       discountBp: 1000,
+      autoApplyAll: false,
       planClass: 'compact_car',
       vipBooking: false,
       inclusions: [
