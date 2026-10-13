@@ -8,15 +8,17 @@
 //                        (the dashboard design's "Wax" becomes "Hand wax", keeping its id and checklist);
 //   deactivates          every other active service (never deletes: appointments and invoices snapshot them; reversible in
 //                        Settings), and re-derives the categories of the visits not yet finished;
-//   sets                 the Gold and VIP tiers' name and perks, sold online (the checkout URLs are left as they are).
+//   sets                 the Gold and VIP tiers' name and perks, sold online (the checkout URLs are left as they are), and the
+//                        inclusions those perks promise while the tier covers no active service (review Q4 pricing:F1).
 //
 // Prices are NOT set here (ADR 0170, plan decision 9: the website's figures were wrong): a service keeps the price it has, a new one
 // starts at $0 with no price by size, and the owner fills Settings → Prices by size (the `pricing-defaults` profile seeds only the
 // $40 Signature Hand Wash at Compact car and Gold at $129 a month). Run it together with `pricing-defaults`, and switch the website
 // to the live catalog only once the grid is filled. The member/guest prices, the guest markup and the tint matrix are not written.
 //
-// Members' coverage: a tier's inclusions name the services they cover. Each run logs a WARNING line per inclusion of an active tier
-// that covers no active service: align the inclusions in Settings → Memberships before members redeem.
+// Members' coverage: a tier's inclusions name the services they cover. A tier that covers no active service gets the inclusions its
+// perks promise (Gold: 4 hand washes a month; VIP: those, wax and engine bay every wash, leather 2 and stain removal 1 a month).
+// Each run still logs a WARNING line per inclusion of an active tier that covers no active service.
 //
 // Idempotent: a second run changes nothing (no version bump, no audit row). A run after the owner edited the catalog resets these
 // fields to the website's content again, so run it once (production) and edit in Settings afterwards. Every change is audited under
@@ -25,6 +27,7 @@
 // Durations: the design's own for the washes ("about 45 min", "about 30 min"); the rest are the seed's choices, for the owner to
 // review in Settings (listed in WEBSITE_DURATIONS_CHOSEN).
 import { sql } from 'kysely'
+import { writeInclusions, type InclusionInput } from '../../src/modules/catalog/tiers.js'
 import { ensurePlans, inclusionCovers, loadPlans } from '../../src/modules/memberships/plans.js'
 import type { PlanKey } from '../../src/modules/memberships/schema.js'
 import { refreshOpenAppointmentCategories } from '../../src/modules/catalog/appointment-categories.js'
@@ -228,23 +231,47 @@ export const WEBSITE_TINT_FILMS = [
   { key: 'ceramic', label: 'Ceramic', vlt: [5, 20, 35, 50, 70] },
 ]
 
+export interface WebsiteInclusion {
+  label: string
+  mode: 'per_cycle' | 'every_visit'
+  /** per_cycle: visits a month. */
+  perCycle: number | null
+  /** The website services it covers, by name. */
+  services: string[]
+}
+
 export interface WebsitePlan {
   key: PlanKey
   name: string
   perks: string[]
+  /** What the perks promise, as inclusions (review Q4 pricing:F1): written while the tier covers no active service. */
+  inclusions: WebsiteInclusion[]
 }
 
-/** The join flow's two tiers (joinVM's T), sold online; their prices are set in Settings (pricing-defaults seeds Gold's). */
+const HAND_WASHES: WebsiteInclusion = { label: 'Hand washes', mode: 'per_cycle', perCycle: 4, services: ['Signature Hand Wash', 'Exterior Hand Wash'] }
+
+/**
+ * The join flow's two tiers (joinVM's T), sold online; their prices are set in Settings (pricing-defaults seeds Gold's). The perks say
+ * only what the inclusions give: the member % off starts at 0 (plan decision 3), so no "member prices" line until the owner sets one.
+ */
 export const WEBSITE_PLANS: readonly WebsitePlan[] = [
   {
     key: 'gold',
     name: 'Gold',
-    perks: ['4 hand washes a month, interior included', 'Share across household cars', 'No booking fees', 'Member prices on everything else'],
+    perks: ['4 hand washes a month, interior included', 'Share across household cars', 'No booking fees'],
+    inclusions: [HAND_WASHES],
   },
   {
     key: 'vip',
     name: 'VIP',
     perks: ['Everything in Gold', 'Wax every wash + engine bay', 'Leather 2× and stain removal 1× a month', 'Priority booking and same-day guarantee'],
+    inclusions: [
+      HAND_WASHES,
+      { label: 'Wax every wash', mode: 'every_visit', perCycle: null, services: ['Hand wax'] },
+      { label: 'Engine bay every wash', mode: 'every_visit', perCycle: null, services: ['Engine bay wash'] },
+      { label: 'Leather conditioning', mode: 'per_cycle', perCycle: 2, services: ['Leather conditioning'] },
+      { label: 'Stain removal', mode: 'per_cycle', perCycle: 1, services: ['Stain removal'] },
+    ],
   },
 ]
 
@@ -441,6 +468,36 @@ export async function seedWebsiteCatalog(ctx: SeedContext): Promise<WebsiteCatal
       .execute()
     await audit.record(tx, { locationId: location.id, action: 'catalog.seed.plan', entityType: 'membership_plan', entityId: p.key, before: cur, after: want, ctx: ACTOR })
     out.plans.push(p.key)
+  }
+
+  // the tiers' inclusions: what their perks promise (review Q4 pricing:F1), written only while the tier covers no active service (a
+  // fresh catalog, or one whose inclusions name services this run deactivated); the owner's own inclusions are left alone
+  const activeNow = await tx.selectFrom('services').select(['id', 'name', 'kind']).where('location_id', '=', location.id).where('active', '=', true).execute()
+  for (const p of WEBSITE_PLANS) {
+    const plan = (await loadPlans(tx, location.id)).find((x) => x.key === p.key)
+    if (!plan) continue
+    if (plan.inclusions.some((r) => r.active && activeNow.some((x) => inclusionCovers(r, x.id)))) continue
+    const next: InclusionInput[] = p.inclusions.map((i) => ({
+      label: i.label,
+      mode: i.mode,
+      perCycle: i.mode === 'every_visit' ? null : i.perCycle,
+      // plan decision 2: inclusions apply by themselves at completion
+      autoApply: true,
+      serviceIds: i.services.flatMap((name) => activeNow.filter((x) => x.name === name).map((x) => x.id)),
+    })).filter((i) => i.serviceIds.length > 0)
+    if (next.length === 0) continue
+    await writeInclusions(tx, { newId: ctx.newId }, plan, next)
+    await tx.updateTable('membership_plans').set((eb) => ({ version: eb('version', '+', 1), updated_at: eb.fn('app_now', []) })).where('id', '=', plan.id).execute()
+    await audit.record(tx, {
+      locationId: location.id,
+      action: 'catalog.seed.plan',
+      entityType: 'membership_plan',
+      entityId: p.key,
+      before: { inclusions: plan.inclusions.map((r) => r.label) },
+      after: { inclusions: next.map((i) => ({ label: i.label, mode: i.mode, perCycle: i.perCycle, services: i.serviceIds.length })) },
+      ctx: ACTOR,
+    })
+    if (!out.plans.includes(p.key)) out.plans.push(p.key)
   }
 
   if (out.created.length + out.updated.length + out.deactivated.length > 0)

@@ -4,6 +4,8 @@
 // (test/public-http/memberships.test.ts).
 import { afterEach, describe, expect, it } from 'vitest'
 import { loadEnv } from '../../src/config/env.js'
+import { ensureVehicleClasses } from '../../src/modules/catalog/vehicle-classes.js'
+import { ensurePlans } from '../../src/modules/memberships/plans.js'
 import { configureSquareRuntime } from '../../src/modules/square/runtime.js'
 import { testDatabaseUrl } from '../helpers/env.js'
 import { json, PHONES, usePublicHarness } from '../public-http/harness.js'
@@ -18,6 +20,16 @@ describe('joining on the website with Square as the processor', () => {
   it('texts the client their membership page; no pending membership, no Squarespace product, staff told', async () => {
     const sim = simFor(h.clock)
     configureSquareRuntime({ env: loadEnv({ NODE_ENV: 'test', DATABASE_URL: testDatabaseUrl(), ...coreVars }), api: () => sim.api })
+    // Gold is priced (a tier with no price is not sold online with Square: review Q4 F7)
+    await ensureVehicleClasses(h.db, h.locationId)
+    await ensurePlans(h.db, { locationId: h.locationId, clock: h.clock, newId: h.newId })
+    const gold = await h.db.selectFrom('membership_plans').select(['id', 'price_version']).where('key', '=', 'gold').executeTakeFirstOrThrow()
+    await h.db.updateTable('membership_tier_prices').set({ superseded_at: h.clock.now() }).where('plan_id', '=', gold.id).where('class_key', '=', 'compact_car').where('superseded_at', 'is', null).execute()
+    await h.db
+      .insertInto('membership_tier_prices')
+      .values({ id: h.newId(), location_id: h.locationId, plan_id: gold.id, class_key: 'compact_car', monthly_cents: 12900, price_version: gold.price_version + 1, effective_from: h.clock.now() })
+      .execute()
+    await h.db.updateTable('membership_plans').set({ price_version: gold.price_version + 1 }).where('id', '=', gold.id).execute()
     const r = await h.post('public/memberships', {
       tier: 'gold',
       name: 'Jo Joiner',

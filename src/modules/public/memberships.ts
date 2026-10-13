@@ -118,6 +118,13 @@ export async function joinTierOf(tx: Tx, d: PublicDeps, loc: PublicLocation, inp
     })
   // the size it is priced at (ADR 0170): a size named must have a price for the tier (422 TIER_CLASS_UNPRICED)
   const size = await resolvePlanClass(tx, loc.id, plan.id, { requested: input.planClass, requirePrice: input.planClass !== undefined, path: 'body.planClass' })
+  // with Square billing the membership, a tier with no price at any size is not sold online (plan decision 3; review Q4 pricing:F7):
+  // its page could never subscribe. With Squarespace the checkout's product carries the price, as today
+  if (size.monthlyCents === null && squareProcessor(squareEnv()))
+    throw new AppError('VALIDATION_FAILED', {
+      detail: 'That plan is not available right now.',
+      errors: [{ path: 'body.tier', message: 'That plan is not available right now.' }],
+    })
   const sizeLabel = (await tx.selectFrom('vehicle_classes').select('label').where('location_id', '=', loc.id).where('key', '=', size.classKey).executeTakeFirst())?.label ?? null
   const sized = { planClass: size.classKey, planClassLabel: sizeLabel, monthlyCents: size.monthlyCents }
   return { plan, spec, size, sizeLabel, sized }

@@ -206,22 +206,27 @@ describe('website-catalog seed', () => {
     const plans = await loadPlans(t.db, locationId)
     const active = (await services()).filter((s) => s.active)
     const coverage = Object.fromEntries(
-      plans.flatMap((p) => p.inclusions.map((r) => [`${p.key}: ${r.label}`, active.filter((s) => inclusionCovers(r, s.id)).map((s) => s.name)])),
+      plans.flatMap((p) => p.inclusions.map((r) => [`${p.key}: ${r.label}`, active.filter((s) => inclusionCovers(r, s.id)).map((s) => s.name).sort()])),
     )
-    // the tiers' inclusions name the design's services they covered when they were made; the website's washes are new rows
+    // the tiers the website sells get the inclusions their perks promise (review Q4 F1); the other tiers' inclusions name the
+    // design's services they covered when they were made (the website's washes are new rows)
+    const washes = ['Exterior Hand Wash', 'Signature Hand Wash']
     expect(coverage).toEqual({
       'essential: Express wash': [],
-      'gold: Premium wash': [],
-      'vip: Express wash': [],
-      'vip: Executive detail': [],
+      'gold: Hand washes': washes,
+      'vip: Hand washes': washes,
+      'vip: Wax every wash': ['Hand wax'],
+      'vip: Engine bay every wash': ['Engine bay wash'],
+      'vip: Leather conditioning': ['Leather conditioning'],
+      'vip: Stain removal': ['Stain removal'],
       'exotic: Hand wash': [],
     })
     expect(lines.filter((l) => l.startsWith('WARNING'))).toEqual(
-      ['essential: Express wash', 'gold: Premium wash', 'vip: Express wash', 'vip: Executive detail', 'exotic: Hand wash'].map(
+      ['essential: Express wash', 'exotic: Hand wash'].map(
         (r) => `WARNING website-catalog: inclusion "${r}" covers no active service; align it in Settings → Memberships before members redeem (ADR 0170)`,
       ),
     )
-    // once Gold covers the Signature wash, it is no longer listed
+    // the owner's own inclusions are never replaced by a later run
     await t.db.transaction().execute(async (tx) => {
       const gold = await requireTier(tx, locationId, 'gold')
       const sig = await byName('Signature Hand Wash')
@@ -237,6 +242,7 @@ describe('website-catalog seed', () => {
     })
     const again: string[] = []
     await runSeed({ db: t.db, clock, profile: 'website-catalog', log: (l) => again.push(l) })
+    expect((await loadPlans(t.db, locationId)).find((p) => p.key === 'gold')!.inclusions.map((r) => r.label)).toEqual(['Hand wash'])
     expect(again.filter((l) => l.includes('gold:'))).toEqual([])
   })
 

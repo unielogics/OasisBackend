@@ -20,6 +20,7 @@ import {
 import { loadAppointmentRefs } from '../../src/modules/assistant/tools/refs.js'
 import { grantTrust } from '../../src/modules/identity/trust.js'
 import type { ClientLinkKind } from '../../src/modules/identity/schema.js'
+import { ensureVehicleClasses } from '../../src/modules/catalog/vehicle-classes.js'
 import { loadPublicCatalogV2 } from '../../src/modules/public/catalog.js'
 import type { Actor, SchedulingCtx } from '../../src/modules/scheduling/context.js'
 import { toBizDate } from '../../src/platform/time.js'
@@ -53,6 +54,21 @@ export function aiActorOf(locationId: string): Actor {
     auth: { userId: 'assistant', employeeId: null, locationId, permissions: new Set(['sched.edit', 'jobs.status']), actorName: AI_ACTOR_NAME, roles: ['assistant'] },
     audit: { actor: { name: AI_ACTOR_NAME } },
   }
+}
+
+/**
+ * The owner has filled Settings → Prices by size: every active service the design seed priced with one figure gets that figure at
+ * every active size (catalog v2 and the facts list no item without a price by size: ADR 0170 design 11, review Q4 F2). A service a
+ * test priced itself is left alone.
+ */
+export async function priceTheGrid(w: World): Promise<void> {
+  await ensureVehicleClasses(w.t.db, w.locationId)
+  await sql`insert into service_class_prices (service_id, location_id, class_key, price_cents)
+    select s.id, s.location_id, c.key, s.price_cents from services s
+    join vehicle_classes c on c.location_id = s.location_id and c.active
+    where s.location_id = ${w.locationId} and s.active and not s.quote_only and s.price_cents > 0
+      and not exists (select 1 from service_class_prices p where p.service_id = s.id)
+    on conflict do nothing`.execute(w.t.db)
 }
 
 /** Shop facts from the public catalog v2 (facts-v4: the catalog part is what the tools read; the rest is plain filler). */
@@ -173,6 +189,7 @@ export function useToolWorld(o: { env?: Record<string, string> } = {}): ToolWorl
     await sql`update vehicles set vehicle_type = null`.execute(w.t.db)
     await sql`update customers set needs_details = false, deleted_at = null, archived_at = null where source <> 'inbound_sms'`.execute(w.t.db)
     logs.length = 0
+    await priceTheGrid(w)
     facts = await testFacts(w)
     const log = {
       info: (obj: unknown, msg?: string) => void logs.push({ level: 'info', obj, ...(msg ? { msg } : {}) }),

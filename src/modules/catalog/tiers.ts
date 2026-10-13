@@ -267,7 +267,7 @@ const tierAudit = (t: Tier) => ({
 })
 
 /** Replaces the tier's inclusions: kept ids are updated, new ones inserted, dropped ones deleted (or turned off when credits name them). */
-async function writeInclusions(tx: Tx, d: { newId: NewId }, plan: Plan, next: InclusionInput[]): Promise<void> {
+export async function writeInclusions(tx: Tx, d: { newId: NewId }, plan: Plan, next: InclusionInput[]): Promise<void> {
   for (const [i, inc] of next.entries()) {
     if (inc.id !== undefined && !plan.inclusions.some((x) => x.id === inc.id))
       throw invalid(`inclusions.${i}.id`, 'That inclusion belongs to another tier: leave the id out to add it.')

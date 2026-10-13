@@ -293,7 +293,9 @@ export async function loadPublicCatalogV2(db: Executor, locationId: string, now:
     loadTierCells(db, locationId),
   ])
   const live = new Set(categories.map((c) => c.key))
-  const unpriced = (s: CatalogService): boolean => !s.quoteOnly && fromPrice(book, s.id).basis === 'base' && s.priceCents === 0
+  // an item with no price at any active size is not listed (ADR 0170 design 11, plan decisions 3 and 9; review Q4 pricing:F2): never
+  // one figure for every size from the legacy price the owner has not confirmed in the size grid
+  const unpriced = (s: CatalogService): boolean => !s.quoteOnly && fromPrice(book, s.id).basis === 'base'
   const listed = (s: CatalogService): boolean => s.visibleOnline && live.has(s.category) && !unpriced(s)
   // the tiers sold online: active, public, with a current price at an active size
   const sold = plans

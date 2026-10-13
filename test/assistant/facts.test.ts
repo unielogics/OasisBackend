@@ -139,7 +139,8 @@ describe('the shop facts document', () => {
     const goldPerks = values.get('{perks:gold}')!
     expect(goldPerks).toMatch(/^Gold includes: /)
     expect(goldPerks).toContain('16.67% off other services and add-ons')
-    expect(goldPerks).toContain('4 hand washes a month, interior included')
+    // the seeded inclusion says it (review Q4 F1: Gold covers its 4 hand washes a month)
+    expect(goldPerks).toMatch(/Signature Hand Wash.*4 a month/)
     for (const i of gold.inclusions) expect(goldPerks).toContain(i.services[0]!)
     // a perk worded as a promise ("Priority booking and same-day guarantee") is never texted, not even as the shop's own wording
     expect(values.get('{perks:vip}')).not.toMatch(/guarantee|discount|free/i)

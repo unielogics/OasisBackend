@@ -570,7 +570,7 @@ describe('W4 live eval: what the eval on Bedrock found in these seams', () => {
     expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
     const values = placeholderValues(await a.facts())
     expect((await outTexts(maria()))[0]!.body).toContain(`Gold starts at $99 a month (sedan/coupe). ${values.get('{perks:gold}')}. Want a link to join?`)
-    expect(values.get('{perks:gold}')).toContain('4 hand washes a month')
+    expect(values.get('{perks:gold}')).toMatch(/Signature Hand Wash.*4 a month/)
     // the judge read the perks as the server's own part: its <own-text> has only the model's words
     const judged = JSON.stringify(a.judge.requests[0]!.messages)
     expect(judged).toContain('<own-text>\\n…. …. Want a link to join?\\n</own-text>')

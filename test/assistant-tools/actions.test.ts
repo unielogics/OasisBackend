@@ -158,7 +158,8 @@ describe('the reply number (ActionCodeHandler)', () => {
     expect(await w.t.db.selectFrom('leads').select(['status', 'booked_appointment_id']).executeTakeFirstOrThrow()).toEqual({ status: 'booked', booked_appointment_id: a!.id })
     const booked = (await aiTexts(maria().id)).find((m) => m.template_key === 'action_booked')!
     expect(booked).toMatchObject({ klass: 'ai_reply', sender_kind: 'ai' })
-    expect(booked.body).toMatch(/^You're booked: Express Hand Wash, Mon Jun 15 at 10:00 AM\. \$\d+(?:\.\d\d)? booking fee due at the shop\. See you then!/)
+    // no size said in the chat: the price is confirmed at the shop (the grid prices the wash by size: review Q4 F2)
+    expect(booked.body).toMatch(/^You're booked: Express Hand Wash, Mon Jun 15 at 10:00 AM\. \$\d+(?:\.\d\d)? booking fee due at the shop\. (?:We'll confirm the exact price at the shop\. )?See you then!/)
     const vehicle = await w.t.db.selectFrom('appointments').innerJoin('vehicles', 'vehicles.id', 'appointments.vehicle_id').select(['vehicles.model']).where('appointments.id', '=', a!.id).executeTakeFirst()
     expect(vehicle).toEqual({ model: 'Q5' })
     expect(await w.t.db.selectFrom('audit_log').select('actor_name').where('action', '=', 'assistant.booking.confirmed').execute()).toEqual([{ actor_name: 'Oasis AI (SMS)' }])
@@ -488,7 +489,7 @@ describe('guard polish after W4b-fix (P3): a Spanish conversation gets every ser
     await reply(maria().phone, await lastCodeEs(maria().phone), maria().id)
     const booked = (await aiTexts(maria().id)).at(-1)!
     expect(booked).toMatchObject({ template_key: 'action_booked', klass: 'ai_reply', sender_kind: 'ai' })
-    expect(booked.body).toMatch(/^Reservado: Express Hand Wash, lun 15 jun, 10:00 a\. m\. (?:Tarifa de reserva de \$\d+(?:\.\d\d)?, se paga (?:en el local|con el enlace de pago)\. |Los miembros nunca pagan tarifa de reserva\. )?¡Te esperamos!$/)
+    expect(booked.body).toMatch(/^Reservado: Express Hand Wash, lun 15 jun, 10:00 a\. m\. (?:Tarifa de reserva de \$\d+(?:\.\d\d)?, se paga (?:en el local|con el enlace de pago)\. |Los miembros nunca pagan tarifa de reserva\. )?(?:Confirmamos el precio exacto en el local\. )?¡Te esperamos!$/)
   })
 
   it('reschedule and cancel: the Spanish ack instead of the English scheduling text', async () => {

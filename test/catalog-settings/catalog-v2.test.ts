@@ -179,12 +179,9 @@ describe('GET /public/catalog/v2', () => {
         { class: 'compact_suv', cents: 32300, maxCents: 39500, memberCents: 29100, memberMaxCents: 35600 },
       ],
     })
-    // an item without any price (no cell, a $0 base price) is not listed; one with a base price only has no cells and no size
+    // an item without any price by size is not listed, whatever its legacy one figure (review Q4 F2: never one price for every size)
     expect(svc('interior-detail')).toBeUndefined()
-    const full = svc('full-detail')
-    expect(full.prices).toEqual([])
-    expect(full.fromClass).toBeNull()
-    expect(full.fromCents).toBeGreaterThan(0)
+    expect(svc('full-detail')).toBeUndefined()
     expect(b.addons.find((a: { key: string }) => a.key === 'hand-wax')).toMatchObject({
       prices: [{ class: 'compact_car', cents: 4700, maxCents: null, memberCents: 4200, memberMaxCents: null }],
       includedIn: [],
