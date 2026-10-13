@@ -404,7 +404,15 @@ export async function ingestSquareRefund(
   if (rf.status !== 'COMPLETED') return { status: 'processed', note: `refund made at Square, ${rf.status.toLowerCase()}: waiting for it to complete` }
   if (!rf.paymentId) return { status: 'ignored', note: 'refund without a payment' }
   const mirror = await tx.selectFrom('square_payments').selectAll().where('square_payment_id', '=', rf.paymentId).executeTakeFirst()
-  if (!mirror?.invoice_id) return { status: 'processed', note: 'refund of a Square payment that is not on an invoice: see the payments to match' }
+  if (!mirror?.invoice_id) {
+    // its payment is not on an invoice yet (the counter delay, the queue): kept until it is, then recorded there (review Q4 SQ-SEM-1)
+    await tx
+      .insertInto('square_refunds_waiting')
+      .values({ square_refund_id: rf.refundId, location_id: d.locationId, square_payment_id: rf.paymentId, facts: JSON.stringify({ ...rf, createdAt: rf.createdAt.toISOString() }) })
+      .onConflict((oc) => oc.column('square_refund_id').doNothing())
+      .execute()
+    return { status: 'processed', note: 'refund of a Square payment that is not on an invoice yet: kept until the payment is matched' }
+  }
   const ops = new SquareLedgerOps(d)
   const awaiting = await tx
     .selectFrom('ledger_events as e')
@@ -466,3 +474,19 @@ export async function ingestSquareRefund(
   return { status: 'processed', note: r.created ? 'refund made in the Square app: recorded, needs review' : 'refund already recorded' }
 }
 
+/**
+ * The refunds made in the Square app while the payment was not on an invoice (review Q4 SQ-SEM-1), recorded now that it is: in the
+ * caller's transaction, right after the payment was recorded (the matcher, the queue's apply, a link or a charge). Each is recorded
+ * once (its ledger key) and its waiting row deleted.
+ */
+export async function drainWaitingRefunds(tx: Tx, d: { locationId: string; clock: Clock; newId: NewId }, paymentId: string): Promise<number> {
+  const rows = await tx.selectFrom('square_refunds_waiting').selectAll().where('square_payment_id', '=', paymentId).orderBy('received_at').forUpdate().execute()
+  let n = 0
+  for (const row of rows) {
+    const f = (typeof row.facts === 'string' ? JSON.parse(row.facts) : row.facts) as Omit<SquareRefundFacts, 'createdAt'> & { createdAt: string }
+    await tx.deleteFrom('square_refunds_waiting').where('square_refund_id', '=', row.square_refund_id).execute()
+    const out = await ingestSquareRefund(tx, d, { ...f, createdAt: new Date(f.createdAt) })
+    if (out.status === 'processed') n++
+  }
+  return n
+}

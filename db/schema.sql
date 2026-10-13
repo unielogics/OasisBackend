@@ -3094,6 +3094,18 @@ CREATE TABLE public.square_refund_legs (
 );
 
 --
+-- Name: square_refunds_waiting; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.square_refunds_waiting (
+    square_refund_id text NOT NULL,
+    location_id uuid NOT NULL,
+    square_payment_id text NOT NULL,
+    facts jsonb NOT NULL,
+    received_at timestamp with time zone DEFAULT public.app_now() NOT NULL
+);
+
+--
 -- Name: square_state; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -4517,6 +4529,13 @@ ALTER TABLE ONLY public.square_refund_legs
     ADD CONSTRAINT square_refund_legs_square_refund_id_key UNIQUE (square_refund_id);
 
 --
+-- Name: square_refunds_waiting square_refunds_waiting_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_refunds_waiting
+    ADD CONSTRAINT square_refunds_waiting_pkey PRIMARY KEY (square_refund_id);
+
+--
 -- Name: square_state square_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5633,6 +5652,12 @@ CREATE INDEX square_refund_legs_open_idx ON public.square_refund_legs USING btre
 CREATE INDEX square_refund_legs_payment_idx ON public.square_refund_legs USING btree (square_payment_id);
 
 --
+-- Name: square_refunds_waiting_payment_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX square_refunds_waiting_payment_idx ON public.square_refunds_waiting USING btree (square_payment_id);
+
+--
 -- Name: square_subscription_invoices_membership_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5853,6 +5878,12 @@ CREATE INDEX waitlist_offers_slot_idx ON public.waitlist_offers USING btree (loc
 --
 
 CREATE INDEX webhook_log_received_idx ON public.webhook_log USING btree (received_at);
+
+--
+-- Name: webhook_log_square_open_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX webhook_log_square_open_idx ON public.webhook_log USING btree (received_at) WHERE ((provider = 'square'::text) AND (status = ANY (ARRAY['received'::text, 'failed'::text])));
 
 --
 -- Name: audit_log audit_log_no_update_delete; Type: TRIGGER; Schema: public; Owner: -
@@ -7706,6 +7737,13 @@ ALTER TABLE ONLY public.square_refund_legs
 
 ALTER TABLE ONLY public.square_refund_legs
     ADD CONSTRAINT square_refund_legs_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: square_refunds_waiting square_refunds_waiting_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_refunds_waiting
+    ADD CONSTRAINT square_refunds_waiting_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: square_state square_state_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

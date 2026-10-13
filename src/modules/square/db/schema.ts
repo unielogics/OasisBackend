@@ -152,11 +152,21 @@ export interface SquarePosIntentsTable {
   callback_at: Date | null
 }
 
+/** A refund made in the Square app before its payment was on an invoice (review Q4 SQ-SEM-1): recorded once the payment is. */
+export interface SquareRefundsWaitingTable {
+  square_refund_id: string
+  location_id: string
+  square_payment_id: string
+  facts: unknown
+  received_at: Generated<Date>
+}
+
 declare module '../../../platform/schema.js' {
   interface Database {
     square_state: SquareStateTable
     square_payments: SquarePaymentsTable
     square_refund_legs: SquareRefundLegsTable
     square_pos_intents: SquarePosIntentsTable
+    square_refunds_waiting: SquareRefundsWaitingTable
   }
 }

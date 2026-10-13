@@ -131,16 +131,20 @@ describe('SquareClient', () => {
     await expect(h3.api.subscriptions.cancel('S1')).rejects.toMatchObject({ code: 'BAD_REQUEST' })
   })
 
-  it('observe-only refuses every change before sending; reads, searches and setup calls still go', async () => {
-    const h = harness([{ status: 200, body: { customers: [] } }, { status: 200, body: {} }, { status: 200, body: { payment } }], { writesEnabled: false })
+  it('observe-only refuses every change before sending; reads, searches, setup calls and link clean-ups still go', async () => {
+    const h = harness(
+      [{ status: 200, body: { customers: [] } }, { status: 200, body: {} }, { status: 200, body: { payment } }, { status: 200, body: { id: 'L1', cancelled_order_id: 'O1' } }],
+      { writesEnabled: false },
+    )
     await expect(h.api.payments.create(sqKey('ch', 'x'), { source_id: 's', amount_money: usd(1), location_id: 'L' })).rejects.toBeInstanceOf(SquareWritesDisabled)
     await expect(h.api.subscriptions.cancel('S1')).rejects.toBeInstanceOf(SquareWritesDisabled)
-    await expect(h.api.checkout.deleteLink('L1')).rejects.toBeInstanceOf(SquareWritesDisabled)
     expect(h.calls).toHaveLength(0)
     await h.api.customers.search({ reference_id: 'x' })
     await h.api.events.enable()
     await h.api.payments.get('P1')
-    expect(h.calls.map((c) => c.init.method)).toEqual(['POST', 'PUT', 'GET'])
+    // deleting a payment link is a clean-up that stops it taking money: allowed observe-only (review Q4 M2)
+    await h.api.checkout.deleteLink('L1')
+    expect(h.calls.map((c) => c.init.method)).toEqual(['POST', 'PUT', 'GET', 'DELETE'])
   })
 
   it('a 2xx with the wrong shape is a wire error; a key missing from the body is refused before sending', async () => {

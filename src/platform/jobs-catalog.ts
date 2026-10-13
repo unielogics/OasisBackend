@@ -296,7 +296,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   'square.events.catchup': {
     owner: 'square',
     purpose:
-      'Every 10 minutes while SQUARE_PROVIDER=live with a token and location: SearchEvents from the watermark minus 10 minutes (never more than 28 days back; the first run reads the last day), each event claimed in the same webhook_log as the hook and processed at once; a failed event holds the watermark back; a complete run with no failure moves it to at least the run time minus 10 minutes; a watermark older than 27 days (runs failing or unfinished that long) is an alert in square_state and the status row.',
+      'Every 10 minutes while SQUARE_PROVIDER=live with a token and location: SearchEvents from the watermark minus 10 minutes (never more than 28 days back; the first run reads the last day), each event claimed in the same webhook_log as the hook and processed at once; a failed event holds the watermark back; a complete run with no failure moves it to at least the run time minus 10 minutes; a watermark older than 27 days (runs failing or unfinished that long) is an alert in square_state and the status row. Each run also takes up, from the log itself, up to 50 Square rows the hook claimed whose job was lost (still received after 15 minutes) or that failed, whatever the search window (review Q4).',
     idempotency: 'webhook_log unique (square, event_id): an event the webhook already claimed is skipped (a failed one is run again).',
     clock: 'Injected clock for the window and the watermark.',
     tests: 'test/square-db/jobs.test.ts, test/square-db/sim-socket.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',
@@ -324,7 +324,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   'square.links.sweep': {
     owner: 'square',
     purpose:
-      'Every minute: cancels the active Square payment links whose invoice no longer owes exactly their amount (canceled, paid or changed; a deposit paid; older than 7 days), gives up on pending rows nobody activated (10 minutes; a booking\'s deposit request after a day), and deletes the canceled links at Square (404 counts as done; only with SQUARE_WRITES_ENABLED). Nothing to do with the defaults (no Square link exists before PAYMENT_PROCESSOR=square).',
+      'Every minute: cancels the active Square payment links whose invoice no longer owes exactly their amount (canceled, paid or changed; a deposit paid; older than 7 days), gives up on pending rows nobody activated (10 minutes; a booking\'s deposit request after a day), and deletes the canceled links at Square (404 counts as done; observe-only too: a clean-up, review Q4 M2). Nothing to do with the defaults (no Square link exists before PAYMENT_PROCESSOR=square).',
     idempotency: 'State moves only forward (active -> canceled/expired, square_deleted_at set once); a second run finds nothing to change.',
     clock: 'Injected clock for the link and pending ages.',
     tests: 'test/square-db/links.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',
@@ -333,7 +333,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   'square.deposit-link': {
     owner: 'square',
     purpose:
-      'Every minute while PAYMENT_PROCESSOR=square and SQUARE_WRITES_ENABLED: each booking\'s deposit request (booking.guest_fee.collect link; written by the website, personal-link and assistant booking paths) becomes a Square quick-pay link for the deposit, texted to the client (ADR 0171 D2: a deposit toward the visit, settled by the cancel and no-show rules). A deposit already paid or a canceled visit drops the request. Skipped with the defaults.',
+      'Every minute while PAYMENT_PROCESSOR=square and SQUARE_WRITES_ENABLED: each booking\'s deposit request (booking.guest_fee.collect link; written by the website, personal-link and assistant booking paths) becomes a Square quick-pay link for the deposit, texted to the client (ADR 0171 D2: a deposit toward the visit, settled by the cancel and no-show rules). A deposit already paid or a canceled visit drops the request. A request Square refuses for good (a 4xx other than auth, permission or rate limit, a key reused with another body) is given up at once and the managers are told (payments.deposit_link_failed); network errors and 5xx are tried again next minute (review Q4). Skipped with the defaults.',
     idempotency: 'The link is created with the key pl_<row id> (a retry answers the same link) and made live once (pending -> active); the text carries the key payment_link:<row id>.',
     clock: 'Injected clock.',
     tests: 'test/square-db/deposits.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',
@@ -351,7 +351,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   'square.charges.resolve': {
     owner: 'square',
     purpose:
-      'Every minute while SQUARE_WRITES_ENABLED (wave Q3a, ADR 0171 D7): saved-card charges Square did not answer (state unknown, or charging for more than 5 minutes after their process died) are asked again: GetPayment when the payment id is known, otherwise the SAME CreatePayment with the SAME key (ch_<charge id>, or ch_<charge id:attempt> after a decline), so Square answers the payment it made or makes it once; the answer is recorded (charged through SquareLedgerOps, declined with its reason). Attempts older than 23 hours are left to the webhook and the staff. Nothing exists before a staff member confirms a charge.',
+      'Every minute while SQUARE_WRITES_ENABLED (wave Q3a, ADR 0171 D7): saved-card charges Square did not answer (state unknown, or charging for more than 5 minutes after their process died) are asked again: GetPayment when the payment id is known, otherwise the payment the request made is looked for first (ListPayments around the attempt, by reference_id = the charge id; review Q4), a balance charge whose invoice was canceled or now owes less is closed declined (NOT_SENT, nothing charged), and only then the SAME CreatePayment with the SAME key (ch_<charge id>, or ch_<charge id:attempt> after a decline), so Square answers the payment it made or makes it once; the answer is recorded (charged through SquareLedgerOps, declined with its reason). Attempts older than 23 hours are left to the webhook and the staff. Nothing exists before a staff member confirms a charge.',
     idempotency: 'The same request with the same idempotency key (Square answers a key’s first result); recording takes the advisory lock square:payment:<id> and the ledger key square:pay:<id>, and a charge already charged is left alone.',
     clock: 'Injected clock against square_charges.attempted_at.',
     tests: 'test/square-db/charges.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',

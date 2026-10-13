@@ -10,6 +10,7 @@ import { transaction, type Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
 import type { NewId } from '../../platform/ids.js'
 import { maskText } from '../../platform/logging.js'
+import { notifyManagers } from '../messaging/notify.js'
 import type { SquareLogger } from './ingest.js'
 import { activateSquareLink, depositOwed, prepareSquareLink, squareProcessor, squareWritesOn, type SquareLinkDeps } from './links.js'
 import { squareEnv, squareMessenger } from './runtime.js'
@@ -64,6 +65,41 @@ export interface DepositRunReport {
   texted: number
   dropped: number
   failed: number
+}
+
+/** A deposit request Square refused: canceled (square_error) and the managers told once, in one transaction. */
+async function giveUp(d: SquareLinkDeps & { locationId: string; logger: SquareLogger }, rowId: string, invoiceId: string): Promise<void> {
+  await transaction(d.db, async (tx) => {
+    const done = await tx
+      .updateTable('payment_links')
+      .set({ state: 'canceled', canceled_at: d.clock.now(), cancel_reason: 'square_error' })
+      .where('id', '=', rowId)
+      .where('state', '=', 'pending')
+      .executeTakeFirst()
+    if (Number(done.numUpdatedRows ?? 0) === 0) return
+    const inv = await tx
+      .selectFrom('invoices as i')
+      .leftJoin('appointments as a', 'a.id', 'i.appointment_id')
+      .select(['i.invoice_no', 'i.client_name', 'i.appointment_id', 'a.seq'])
+      .where('i.id', '=', invoiceId)
+      .executeTakeFirst()
+    const who = inv?.client_name ?? 'A client'
+    const ref = inv?.seq ? `OAS-${inv.seq}` : inv ? `INV-${inv.invoice_no}` : 'the booking'
+    await notifyManagers(
+      tx,
+      {
+        locationId: d.locationId,
+        kind: 'payments.deposit_link_failed',
+        title: `Deposit link failed · ${who}`,
+        body: `Square refused the deposit link for ${ref}, so ${who.split(/\s+/)[0]} was not texted one. Take the deposit at the counter, or send a payment link from the invoice.`,
+        entityType: inv?.appointment_id ? 'appointment' : 'invoice',
+        entityId: inv?.appointment_id ?? invoiceId,
+        sourceRef: `deposit_link_failed:${rowId}`,
+      },
+      { newId: d.newId, clock: d.clock },
+    )
+  })
+  d.logger.warn({ square: { paymentLink: rowId } }, 'square refused a deposit link: given up, the managers told')
 }
 
 /** square.deposit-link: every pending deposit request becomes a quick-pay link, texted to the client. Idempotent (keys, states). */
@@ -124,6 +160,13 @@ export async function runDepositLinks(d: SquareLinkDeps & { locationId: string; 
     } catch (e) {
       r.failed++
       if (e instanceof AppError && (e.code === 'PAY_NOTHING_TO_COLLECT' || e.code === 'INVOICE_CANCELED')) continue
+      // Square refused the request itself: the same request would be refused every minute for a day while nobody knows; the request
+      // is given up at once and the managers are told to collect the deposit another way (review Q4 SQ-SEM-6)
+      if (e instanceof AppError && e.meta?.refused === true) {
+        await giveUp(d, row.id, row.invoice_id)
+        r.dropped++
+        continue
+      }
       d.logger.warn({ square: { paymentLink: row.id }, err: maskText(String(e)).slice(0, 200) }, 'deposit link not created yet (next run tries again)')
     }
   }

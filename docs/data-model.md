@@ -52,6 +52,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261014500100_card_charges.sql` | Cards on file and fees, wave Q3a (ADR 0171 D7): `square_charges.attempted_at` (the current CreatePayment attempt; the job square.charges.resolve re-sends an unanswered one with the same key within 23 hours), `decline_code`, `reason` ("No-show fee", "Late-cancel fee", "Balance"), `request_key` (the staff request of the current attempt, unique per location: the same request again finds its charge); `customer_cards.expiry_notice_for` (the expiry the nightly job texted a card link about); unique index `square_charges_open_fee_idx`: one open fee per visit and purpose |
 | `20261014600000_square_memberships.sql` | Memberships on Square (ADR 0171, wave Q3b): `memberships.source` gains `square`; the membership's Square subscription, customer and card (`card_id`), `square_status`, `billing_status ok\|failed` with `payment_failed_at` and `failure_notified_at`, what Square scheduled (`cancel_effective_at`, `pause_effective_at`, `scheduled_change` jsonb, `swap_undone_variations`); `membership_tier_prices.square_state` gains `retired`, plus `square_error`, the variation id unique (the guard re-created with `square_error` mutable); `square_enrollments` (the membership page's attempt, a resumable state machine) and `square_subscription_invoices`; card and consent end reason `membership_failed` |
 | `20261014700000_link_retext.sql` | re-texting a personal link (ADR 0160, wave Q3d): `client_links.retexted_at` (when the assistant texted the same link again: once per link, counted in the day's links; its token derives from the link id under a key from `PIN_PEPPER`) |
+| `20261015100000_review_q4.sql` | review Q4 fixes (ADR 0171 wave Q4 notes): `square_refunds_waiting` (a refund made in the Square app before its payment was on an invoice, recorded on the invoice when the payment is); index `webhook_log_square_open_idx` (the catch-up runs the Square rows still received or failed outside its search window) |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -370,6 +371,7 @@ no-show and late-cancel fees, the card lifecycle) and Q3b will (subscriptions).
 
 | `square_payments` | The mirror of every Square payment of our location as last re-fetched (`square_payment_id` unique; status, source type, product, order, reference, note, receipt, `amount_cents` (tip excluded), `tip_cents`, `total_cents`, `refunded_cents`, card brand and last four, Square customer, buyer email, Square times) and Oasis's decision: `classification link\|charge\|membership\|pos_intent\|counter\|ignored`, `match_state pending\|matched\|unmatched\|ignored` (matched = `invoice_id` and `event_id` set; ignored = an `ignore_reason`), `match_after` (a counter payment waits SQUARE_MATCH_DELAY_SECONDS), `tip_event_id`, `rule` (R1 to R4a, link, cash_entry, manual, reassign), `confidence`, ranked `candidates` (jsonb), `variance`, who decided and when |
 | `square_refund_legs` | One Square refund of one Square payment for one ledger refund (the refund row is the outbox): `ledger_event_id`, `square_payment_id`, `amount_cents`, `origin api\|pos` (a refund made in the Square app that Oasis attached or recorded), `idempotency_key` (rf_<leg id>) and `square_refund_id` unique, `state to_submit\|pending\|completed\|failed\|rejected`, `error`, `attempts`, times |
+| `square_refunds_waiting` | A refund made in the Square app while its payment was not on an invoice yet (the counter delay, the "payments to match" queue): `square_refund_id` (key), `square_payment_id`, `facts` (the refund as Square answered it), `received_at`; recorded on the invoice (a refund needing review) and deleted in the transaction that records the payment there (ADR 0171 Q4 SQ-SEM-1) |
 | `square_pos_intents` | "Open Square POS" from the dashboard (SQUARE_POS_API_ENABLED): the invoice, the staff card entry it wrote (`ledger_event_id`), `amount_cents`, the random `callback_state` and the note `code` (OAS-PI-xxxxxx), both unique, `status open\|callback_ok\|callback_error\|matched\|expired`, the callback's transaction ids or error, the matched `square_payment_id`, `expires_at` |
 | `square_customer_links` | The client's Square customer, one per client and location (`src/modules/square/customers.ts` ensureSquareCustomer: this row, else SearchCustomers by `reference_id` = the client's uuid, else CreateCustomer with key `cu_<client id>`): `customer_id`, `square_customer_id` (both unique per location), `linked_by created\|found\|staff` |
 | `customer_cards` | A card saved with Square (`src/modules/square/cards.ts` saveCardOnFile, CreateCard key `cd_<attempt>`): the client, their Square customer, `square_card_id` (unique), `brand`, `last4`, `exp_month`, `exp_year`, `card_type`, `postal`, `fingerprint` (never a card number), `state active\|disabled\|forgotten\|expired` (`disabled_at` set exactly when not active, with `disabled_reason`), `created_via card_link\|membership_link\|staff\|square`, `expiry_notice_for` (the expiry, `YYYY-MM`, a card link was texted about: a card paying a membership, nightly) |
@@ -450,7 +452,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (122 tables, 1 view, 15 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (123 tables, 1 view, 15 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -2629,6 +2631,18 @@ Primary key `(id)`. Unique `(callback_state)`. Unique `(code)`. `(created_by)` r
 
 Primary key `(id)`. Unique `(idempotency_key)`. Unique `(square_refund_id)`. `(ledger_event_id)` references `ledger_events(id)`. `(location_id)` references `locations(id)` on delete cascade. 5 check constraints. Index `square_refund_legs_event_idx` `(ledger_event_id)`. Index `square_refund_legs_open_idx` `(location_id, created_at)` where `state = ANY (ARRAY['to_submit'::text, 'pending'::text])`. Index `square_refund_legs_payment_idx` `(square_payment_id)`.
 
+#### `square_refunds_waiting`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `square_refund_id` | text | no |  |
+| `location_id` | uuid | no |  |
+| `square_payment_id` | text | no |  |
+| `facts` | jsonb | no |  |
+| `received_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(square_refund_id)`. `(location_id)` references `locations(id)` on delete cascade. Index `square_refunds_waiting_payment_idx` `(square_payment_id)`.
+
 #### `square_state`
 
 | Column | Type | Null | Default |
@@ -2896,7 +2910,7 @@ Primary key `(id)`. Unique `(entry_id, slot_start)`. `(entry_id)` references `wa
 | `status` | text | no | `'received'::text` |
 | `error` | text | yes |  |
 
-Primary key `(id)`. Unique `(provider, external_id)`. 2 check constraints. Index `webhook_log_received_idx` `(received_at)`.
+Primary key `(id)`. Unique `(provider, external_id)`. 2 check constraints. Index `webhook_log_received_idx` `(received_at)`. Index `webhook_log_square_open_idx` `(received_at)` where `(provider = 'square'::text) AND (status = ANY (ARRAY['received'::text, 'failed'::text]))`.
 
 #### Views and functions
 

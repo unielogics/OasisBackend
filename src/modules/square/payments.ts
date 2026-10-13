@@ -22,6 +22,7 @@ import { planSquarePayment, rankCandidates, type Identity, type MatchContext, ty
 import { AppError } from '../../platform/errors.js'
 import type { Selectable } from 'kysely'
 import { chargeOfPayment, recordChargePayment } from './charges.js'
+import { drainWaitingRefunds } from './refunds.js'
 import { squareQueue } from './runtime.js'
 
 export type MirrorRow = Selectable<SquarePaymentsTable>
@@ -268,6 +269,13 @@ async function markUnmatched(tx: Tx, d: SquarePaymentDeps, row: MirrorRow, candi
  * recorded at once; a counter payment waits SQUARE_MATCH_DELAY_SECONDS (unless forced), then goes through the matcher.
  */
 export async function decideSquarePayment(tx: Tx, d: SquarePaymentDeps, f: SquarePaymentFacts, o: DecideOptions = {}): Promise<DecideOutcome> {
+  const out = await decide(tx, d, f, o)
+  // a refund made in the Square app while the payment waited is recorded on its invoice now (review Q4 SQ-SEM-1)
+  if (out === 'matched' || out === 'done') await drainWaitingRefunds(tx, d, f.paymentId)
+  return out
+}
+
+async function decide(tx: Tx, d: SquarePaymentDeps, f: SquarePaymentFacts, o: DecideOptions): Promise<DecideOutcome> {
   const ops = new SquareLedgerOps(d)
   const row = await upsertMirror(tx, d, f)
   if (row.match_state === 'matched' || row.match_state === 'ignored') return 'done'
@@ -296,6 +304,27 @@ export async function decideSquarePayment(tx: Tx, d: SquarePaymentDeps, f: Squar
     }
     case 'link': {
       await setClass('link')
+      // paid by its link after the visit was canceled (a link still payable at Square, a webhook late behind the cancel): never kept
+      // silently as money of the canceled invoice, which no cancel rule settles; a person refunds it or applies it from the queue
+      // (review Q4 money:M2)
+      const target = await tx
+        .selectFrom('invoices')
+        .select(['id', 'invoice_no', 'client_name', 'canceled_at'])
+        .where('id', '=', c.link.invoiceId)
+        .executeTakeFirst()
+      if (target?.canceled_at) {
+        const candidate: SquareCandidate = {
+          invoiceId: target.id,
+          invoiceNo: target.invoice_no,
+          client: target.client_name,
+          balanceCents: 0,
+          awaitingEventId: null,
+          score: 5,
+          why: ['paid by its payment link after the visit was canceled'],
+        }
+        await markUnmatched(tx, d, row, [candidate], 'paid by a payment link after the visit was canceled: refund it in Square, or apply it')
+        return 'unmatched'
+      }
       const variance = f.amountCents !== c.link.expectedCents ? { expectedCents: c.link.expectedCents, paidCents: f.amountCents } : null
       await ops.recordPayment(tx, {
         facts: f,
@@ -426,14 +455,19 @@ export async function applySquarePayment(
       .where('location_id', '=', d.locationId)
       .executeTakeFirst()
     if (!ev || ev.invoice_id !== i.invoiceId) throw new AppError('SQUARE_CONFIRM_MISMATCH')
+    let confirmed
     try {
-      return await ops.confirmAwaiting(tx, { facts: f, eventId: i.confirmEventId, rule: 'manual', confidence: 1, actor })
+      confirmed = await ops.confirmAwaiting(tx, { facts: f, eventId: i.confirmEventId, rule: 'manual', confidence: 1, actor })
     } catch (e) {
       if (e instanceof SquareStaleDecision) throw new AppError('SQUARE_CONFIRM_MISMATCH')
       throw e
     }
+    await drainWaitingRefunds(tx, d, f.paymentId)
+    return confirmed
   }
   const r = await ops.recordPayment(tx, { facts: f, invoiceId: i.invoiceId, rule: 'manual', confidence: 1, actor })
   if (!r.created && r.invoiceId !== i.invoiceId) throw new AppError('SQUARE_PAYMENT_DECIDED')
+  // a refund made in the Square app while the payment waited in the queue is recorded on the invoice too (review Q4 SQ-SEM-1)
+  await drainWaitingRefunds(tx, d, f.paymentId)
   return r
 }

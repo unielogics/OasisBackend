@@ -36,6 +36,8 @@ export const checkoutApi = (c: SquareClient): SquareApi['checkout'] => ({
     (await c.request({
       method: 'DELETE',
       path: `/v2/online-checkout/payment-links/${enc(id)}`,
+      // a clean-up that stops a link taking money (review Q4 money:M2): allowed when observe-only, like the setup calls
+      setup: true,
       schema: wire.deletedPaymentLink,
       alreadyDone: ['NOT_FOUND'],
     })) !== null,

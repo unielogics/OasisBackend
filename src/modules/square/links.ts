@@ -16,7 +16,15 @@
 import type { Env } from '../../config/env.js'
 import type { SquareApi } from '../../integrations/ports/square.js'
 import { squareLocationId } from '../../integrations/square/config.js'
-import { SquareError, SquareNetworkError, SquareWritesDisabled } from '../../integrations/square/errors.js'
+import {
+  SquareApiError,
+  SquareAuthError,
+  SquareError,
+  SquareIdempotencyReused,
+  SquareNetworkError,
+  SquarePermissionError,
+  SquareWritesDisabled,
+} from '../../integrations/square/errors.js'
 import { sqKey } from '../../integrations/square/keys.js'
 import { usd } from '../../integrations/square/money.js'
 import type { Clock } from '../../platform/clock.js'
@@ -272,9 +280,25 @@ export async function prepareSquareLink(d: SquareLinkDeps, i: PrepareInput): Pro
         .where('state', '=', 'pending')
         .execute()
     if (e instanceof AppError) throw e
-    if (e instanceof SquareError || e instanceof LinkSumError) throw squareProblem(e)
+    // Square refused the request itself (a 4xx it will refuse again, a key reused with another body) or the lines cannot add up:
+    // the same request never succeeds, so the caller stops retrying it (review Q4 SQ-SEM-6)
+    if (e instanceof SquareError || e instanceof LinkSumError) {
+      const p = squareProblem(e)
+      throw refusedForGood(e) ? new AppError(p.code, { meta: { refused: true } }) : p
+    }
     throw e
   }
+}
+
+/**
+ * A Square answer that a repeat of the same request cannot change: a 4xx other than auth, permission or rate limit (Square refused
+ * the request: a field it rejects, IDEMPOTENCY_KEY_REUSED), or lines that do not add up. Network errors and 5xx are worth repeating.
+ */
+export function refusedForGood(e: unknown): boolean {
+  if (e instanceof LinkSumError) return true
+  if (e instanceof SquareIdempotencyReused) return true
+  if (!(e instanceof SquareApiError) || e instanceof SquareAuthError || e instanceof SquarePermissionError) return false
+  return !e.retryable && e.status >= 400 && e.status < 500
 }
 
 /**
@@ -354,8 +378,8 @@ export function staleReason(
 }
 
 /**
- * square.links.sweep: cancels what no longer matches, gives up on pending rows, deletes canceled links at Square. Idempotent: a
- * second run finds nothing to change. Deleting at Square needs writes (observe-only leaves the canceled rows for later).
+ * square.links.sweep: cancels what no longer matches, gives up on pending rows, deletes canceled links at Square (observe-only too:
+ * DeletePaymentLink is a clean-up). Idempotent: a second run finds nothing to change.
  */
 export async function sweepSquareLinks(d: SquareLinkDeps & { locationId: string }): Promise<SweepReport> {
   const now = d.clock.now()
@@ -400,7 +424,8 @@ export async function sweepSquareLinks(d: SquareLinkDeps & { locationId: string 
     )
     .executeTakeFirst()
   r.canceled += Number(gaveUp.numUpdatedRows ?? 0)
-  if (!squareWritesOn(d.env)) return { ...r, skipped: 'SQUARE_WRITES_ENABLED=false: canceled links are deleted at Square once writes are on' }
+  // deleting a canceled link is a clean-up, done in observe-only mode too (review Q4 money:M2): a link of a canceled invoice must not
+  // stay payable at Square while writes are off (observe-only, or a rollback after links exist)
   const toDelete = await d.db
     .selectFrom('payment_links')
     .select(['id', 'square_payment_link_id'])
