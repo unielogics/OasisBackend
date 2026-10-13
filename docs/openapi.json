@@ -28732,7 +28732,7 @@
         "x-oasis-access": "set.assistant"
       },
       "get": {
-        "description": "Poll it every 2 s while a turn is `running`, or listen for `assistant.practice.turn {sessionId, turnId}` on the notifications channel.",
+        "description": "Poll it every 2 s while a turn is `running`, or listen for `assistant.practice.turn {sessionId, turnId}` on the notifications channel. A chat playing a real client needs cli.view now, as starting one does (403; the list then shows it without the client).",
         "operationId": "getAssistantPracticeSession",
         "parameters": [
           {
@@ -29012,7 +29012,7 @@
     },
     "/api/v1/assistant/practice/sessions/{id}/turns": {
       "post": {
-        "description": "Idempotency-Key required. 202 with the turn `running`; 409 `PRACTICE_BUSY` while one runs (a turn running over 5 minutes is failed as `timeout`), `PRACTICE_OFF`, `PRACTICE_ENDED` after the client opted out; 429 `PRACTICE_BUDGET` when today’s practice budget is spent, `PRACTICE_LIMIT` after 40 turns a session.",
+        "description": "Idempotency-Key required. A chat playing a real client needs cli.view (403). 202 with the turn `running`; 409 `PRACTICE_BUSY` while one runs (a turn running over 5 minutes is failed as `timeout`), `PRACTICE_OFF`, `PRACTICE_ENDED` after the client opted out; 429 `PRACTICE_BUDGET` when today’s practice budget is spent, `PRACTICE_LIMIT` after 40 turns a session.",
         "operationId": "createAssistantPracticeTurn",
         "parameters": [
           {
@@ -29215,7 +29215,7 @@
     },
     "/api/v1/assistant/practice/turns/{id}/rerun": {
       "post": {
-        "description": "The re-run reads the knowledge as it is now (a correction saved meanwhile is in it) and starts from the session as it was before that text; it never changes the session’s own state. Same switches, budget and limits as a text (409 `PRACTICE_BUSY`, `PRACTICE_OFF`; 429 `PRACTICE_BUDGET`, `PRACTICE_LIMIT`); another user’s turn is 404.",
+        "description": "The re-run reads the knowledge as it is now (a correction saved meanwhile is in it) and starts from the session as it was before that text; it never changes the session’s own state. Same switches, budget, limits and cli.view rule as a text (409 `PRACTICE_BUSY`, `PRACTICE_OFF`; 429 `PRACTICE_BUDGET`, `PRACTICE_LIMIT`); another user’s turn is 404.",
         "operationId": "rerunAssistantPracticeTurn",
         "parameters": [
           {
@@ -76515,6 +76515,7 @@
     },
     "/api/v1/kiosk/devices/{id}": {
       "delete": {
+        "description": "A manager signed in on the device is signed out too (the caller’s own session cookie is cleared when it was one).",
         "parameters": [
           {
             "in": "path",
@@ -76814,6 +76815,7 @@
     },
     "/api/v1/kiosk/devices/{id}/lock": {
       "post": {
+        "description": "A manager signed in on the device is signed out too.",
         "parameters": [
           {
             "in": "path",
@@ -76854,6 +76856,7 @@
     },
     "/api/v1/kiosk/lock-all": {
       "post": {
+        "description": "`locked` counts kiosk sessions. Every manager signed in on a kiosk device is signed out too.",
         "responses": {
           "200": {
             "content": {
@@ -77065,7 +77068,7 @@
     },
     "/api/v1/kiosk/settings": {
       "put": {
-        "description": "Turning it on needs a shop code (409 KIOSK_CODE_NOT_SET); turning it off ends every kiosk session. `version` is the version GET /kiosk returned (412 VERSION_CONFLICT when it changed).",
+        "description": "Turning it on needs a shop code (409 KIOSK_CODE_NOT_SET); turning it off ends every kiosk session. Turning it on or off also signs out every manager signed in on a kiosk device (the caller too, when on one: the session cookie is cleared). `version` is the version GET /kiosk returned (412 VERSION_CONFLICT when it changed).",
         "requestBody": {
           "content": {
             "application/json": {
@@ -119261,7 +119264,7 @@
     },
     "/api/v1/settings/billing/sales-tax": {
       "put": {
-        "description": "tax.rate_dbp (ADR 0173; default 7%). `percent` is the rate as staff type it, with up to three decimals (\"6.625\" for New Jersey; a trailing % is accepted), 0 to 100; anything else is 422 `VALIDATION_FAILED` on `percent`. `rounding` (optional; tax.rounding, default `half_up`): `half_even` makes new invoices round their tax like Square (half to even, once on the subtotal), set at the rollout together with 6.625%; left out, the rounding stays as it is. Both apply to invoices made from now on: each invoice keeps the rate and the rounding it was made with. `version` (or If-Match, the version of tax.rate_dbp) required: 428 without, 412 when stale; the rate and the rounding are saved together or not at all. Audited `settings.update`; publishes `settings.changed {key: \"tax.rate_dbp\"}` (and `{key: \"tax.rounding\"}` when the rounding changes).",
+        "description": "tax.rate_dbp (ADR 0173; default 7%). `percent` is the rate as staff type it, with up to three decimals (\"6.625\" for New Jersey; a trailing % is accepted), 0 to 100; anything else is 422 `VALIDATION_FAILED` on `percent`. `rounding` (optional; tax.rounding, default `half_up`): `half_even` makes new invoices round their tax like Square (half to even, once on the subtotal), set at the rollout together with 6.625%; left out, the rounding stays as it is. Both apply to new invoices and, in the same transaction, to the open invoices of visits not done yet (not canceled, date not frozen at completion; audited `payments.tax_rerated` each, `invoice.updated`), so a visit booked before the change is charged the new rate; one that would end up overpaid (paid up front at the old rate) keeps its rate. A finished visit keeps the rate it was made with. A rate above 15% is refused (422 on `percent`) unless `confirmHighRate: true` is sent. `version` (or If-Match, the version of tax.rate_dbp) required: 428 without, 412 when stale; the rate and the rounding are saved together or not at all. Audited `settings.update`; publishes `settings.changed {key: \"tax.rate_dbp\"}` (and `{key: \"tax.rounding\"}` when the rounding changes).",
         "operationId": "putBillingSalesTax",
         "requestBody": {
           "content": {
@@ -119269,6 +119272,12 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "confirmHighRate": {
+                    "enum": [
+                      true
+                    ],
+                    "type": "boolean"
+                  },
                   "percent": {
                     "maxLength": 12,
                     "type": "string"

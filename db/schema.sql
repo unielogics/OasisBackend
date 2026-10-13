@@ -535,6 +535,7 @@ CREATE TABLE public.appointments (
     discount_bp integer,
     price_basis text DEFAULT 'legacy'::text NOT NULL,
     created_by_employee_id uuid,
+    completed_worker_id uuid,
     CONSTRAINT appointments_categories_check CHECK (((array_position(categories, NULL::text) IS NULL) AND (cardinality(categories) <= 10))),
     CONSTRAINT appointments_check CHECK ((scheduled_end > scheduled_start)),
     CONSTRAINT appointments_check1 CHECK (((status <> 'cleaning'::text) OR (bay_id IS NOT NULL))),
@@ -6683,6 +6684,13 @@ ALTER TABLE ONLY public.appointments
 
 ALTER TABLE ONLY public.appointments
     ADD CONSTRAINT appointments_bay_id_fkey FOREIGN KEY (bay_id) REFERENCES public.bays(id);
+
+--
+-- Name: appointments appointments_completed_worker_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointments
+    ADD CONSTRAINT appointments_completed_worker_id_fkey FOREIGN KEY (completed_worker_id) REFERENCES public.employees(id) ON DELETE SET NULL;
 
 --
 -- Name: appointments appointments_created_by_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
