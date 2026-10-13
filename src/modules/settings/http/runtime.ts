@@ -82,7 +82,7 @@ export function createRuntime(
 
 export interface RequestContext {
   locationId: string
-  userId: string
+  userId: string | null
   actorName: string | null
   audit: audit.AuditContext
 }
@@ -99,7 +99,8 @@ export function requestContext(req: FastifyRequest): RequestContext {
 }
 
 /** The user id to store in created_by / updated_by columns, or null when the caller has no users row (dev bypass). */
-export async function storedUserId(db: Executor, userId: string): Promise<string | null> {
+export async function storedUserId(db: Executor, userId: string | null): Promise<string | null> {
+  if (userId === null) return null
   const r = await db.selectFrom('users').select('id').where('id', '=', userId).executeTakeFirst()
   return r?.id ?? null
 }

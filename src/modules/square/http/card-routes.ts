@@ -15,7 +15,7 @@
 // (409 CARD_PAYMENTS_OFF) or Square is watch-only (409 SQUARE_WRITES_OFF).
 import type { FastifyRequest } from 'fastify'
 import { access } from '../../../http/access.js'
-import { auditContextOf } from '../../../http/authorizer.js'
+import { auditContextOf, keyOwnerOf } from '../../../http/authorizer.js'
 import { idempotentHandler } from '../../../http/idempotent.js'
 import type { AppInstance } from '../../../http/types.js'
 import { z } from '../../../http/zod.js'
@@ -154,7 +154,7 @@ export function registerSquareCardRoutes(app: AppInstance, w: SquareCardRoutesWi
   /** The staff request a charge attempt belongs to: the user and the request's Idempotency-Key. */
   const requestKeyOf = (req: FastifyRequest): string | null => {
     const key = req.headers['idempotency-key']
-    return typeof key === 'string' ? `${auth(req).userId}:${key}`.slice(0, 300) : null
+    return typeof key === 'string' ? `${keyOwnerOf(auth(req))}:${key}`.slice(0, 300) : null
   }
   /** What a charge attempt answered, as the route says it: charged 201, unknown 202, declined 422 CARD_DECLINED (key released). */
   const settled = (o: ChargeOutcome): ChargeOutcome => {

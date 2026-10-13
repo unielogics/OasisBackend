@@ -28,7 +28,7 @@ import './problems.js'
 export type BillingAction = 'pause' | 'resume' | 'cancel' | 'cancel_undo' | 'change' | 'change_undo'
 
 export interface StaffActor {
-  userId: string
+  userId: string | null
   name: string
   audit: AuditContext
 }

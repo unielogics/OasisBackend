@@ -4,8 +4,27 @@ import type { FastifyRequest } from 'fastify'
 import { AppError } from '../platform/errors.js'
 import type { AuditContext } from '../platform/audit.js'
 
+/** The kiosk side of a kiosk request's context (ADR 0180). */
+export interface KioskAuthInfo {
+  /** kiosk_sessions.id (the sha256 of the session cookie token). */
+  sessionId: string
+  deviceId: string
+  deviceName: string
+  csrfSecret: string
+  locksAt: Date
+  /** The employee tapped for this request (X-Oasis-Employee), bound on unsafe requests only; null on reads. */
+  acting: { id: string; first: string; last: string; name: string } | null
+}
+
 export interface AuthContext {
-  userId: string
+  /** Absent = a user (the test authorizers). */
+  kind?: 'user' | 'kiosk'
+  /**
+   * The signed-in user; null for a kiosk (ADR 0180: on purpose, so the compiler lists every user-id write, each of which records the
+   * acting employee instead).
+   */
+  userId: string | null
+  /** A user's own employee record; for a kiosk the ACTING employee of this request (null on reads and until bound). */
   employeeId: string | null
   locationId: string
   /** Effective permission keys. '*' grants everything (test authorizers only). */
@@ -19,7 +38,28 @@ export interface AuthContext {
   /** The real person behind a view-as session. */
   realUserId?: string | null
   sessionId?: string
+  /** Set exactly when kind is 'kiosk'. */
+  kiosk?: KioskAuthInfo
 }
+
+export type KioskAuthContext = AuthContext & { kind: 'kiosk'; kiosk: KioskAuthInfo }
+
+export const isKioskContext = (ctx: AuthContext | null | undefined): ctx is KioskAuthContext =>
+  !!ctx && ctx.kind === 'kiosk' && !!ctx.kiosk
+
+/**
+ * Who a request counts as for rate limits, idempotency keys and the event-stream cap: the device for a kiosk (one tablet is one caller,
+ * whoever taps), else the user.
+ */
+export const principalKey = (ctx: AuthContext): string =>
+  isKioskContext(ctx) ? `kiosk:${ctx.kiosk.deviceId}` : `user:${ctx.userId}`
+
+/**
+ * Who owns the caller's stored idempotency and request keys: the user id (unchanged for users, so keys stored before kiosk mode still
+ * replay), or `kiosk:<device id>` for a kiosk. Never null: two kiosks never share a key space.
+ */
+export const keyOwnerOf = (ctx: AuthContext): string =>
+  isKioskContext(ctx) ? principalKey(ctx) : (ctx.userId ?? 'anonymous')
 
 export interface Authorizer {
   /** Permission keys that exist; when provided, routes naming an unknown key fail at boot. */
@@ -35,6 +75,12 @@ export interface Authorizer {
   canSubscribe?(ctx: AuthContext, channel: string): boolean
   /** Synchronizer-token CSRF check for unsafe methods on session-authenticated routes. Throws on failure. */
   verifyCsrf?(req: FastifyRequest, ctx: AuthContext): void | Promise<void>
+  /**
+   * Kiosk contexts only (ADR 0180): binds the employee named by X-Oasis-Employee as the request's actor (422 when it is not an active
+   * or invited, listed employee of the device's location); `required` answers 428 when the header is missing. Without it a kiosk
+   * context can never write (the request hooks fail closed).
+   */
+  bindKioskActor?(req: FastifyRequest, ctx: KioskAuthContext, required: boolean): Promise<void>
 }
 
 export const hasPermission = (ctx: AuthContext, perm: string): boolean =>
@@ -67,6 +113,7 @@ export function auditContextOf(req: FastifyRequest): AuditContext {
     requestId: req.id,
     idempotencyKey: typeof key === 'string' ? key : null,
     ip: req.ip,
+    kioskDeviceId: isKioskContext(a) ? a.kiosk.deviceId : null,
   }
 }
 

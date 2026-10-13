@@ -77,6 +77,12 @@ registerProblems({
     title: 'Nothing to resend',
     detail: 'This person has already accepted their invite or is inactive',
   },
+  // ADR 0180: a user-only route (the person's own account, team and roles) called by the shop's kiosk tablet
+  KIOSK_SESSION: {
+    status: 403,
+    title: 'This is the shop’s kiosk',
+    detail: 'A manager needs to sign in to do that',
+  },
   NO_LOGIN_YET: {
     status: 409,
     title: 'No login yet',

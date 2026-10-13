@@ -17,10 +17,11 @@ import {
   type RealtimeEvent,
 } from '../../platform/realtime.js'
 import { access } from '../access.js'
-import { hasPermission, type AuthContext } from '../authorizer.js'
+import { hasPermission, isKioskContext, principalKey, type AuthContext } from '../authorizer.js'
 import { z } from '../zod.js'
 import type { AppInstance } from '../types.js'
 
+/** Per user, or per kiosk device (principalKey). */
 const MAX_STREAMS_PER_USER = 8
 const MAX_REPLAY = 5000
 const MAX_BUFFERED_BYTES = 1024 * 1024
@@ -51,8 +52,10 @@ const eventData = (e: RealtimeEvent): unknown => ({
 })
 
 function canSubscribe(app: AppInstance, ctx: AuthContext, channel: RealtimeChannel): boolean {
-  if (app.authorizer.canSubscribe) return app.authorizer.canSubscribe(ctx, channel)
   const need = CHANNEL_PERMISSION[channel]
+  // a kiosk is nobody's own inbox (ADR 0180): the per-person notifications channel is refused, whatever the authorizer says
+  if (isKioskContext(ctx) && need === 'self') return false
+  if (app.authorizer.canSubscribe) return app.authorizer.canSubscribe(ctx, channel)
   return need === null || need === 'self' || hasPermission(ctx, need)
 }
 
@@ -104,7 +107,8 @@ export function registerEventsRoute(app: AppInstance): void {
       const allowed = wanted.filter((c) => canSubscribe(app, ctx, c))
       const denied = wanted.filter((c) => !allowed.includes(c))
 
-      const count = perUser.get(ctx.userId) ?? 0
+      const caller = principalKey(ctx)
+      const count = perUser.get(caller) ?? 0
       if (count >= MAX_STREAMS_PER_USER) {
         throw new AppError('RATE_LIMITED', { detail: 'Too many open event streams for this user' })
       }
@@ -114,7 +118,7 @@ export function registerEventsRoute(app: AppInstance): void {
       const resuming = rawLast !== ''
       const lastId = /^\d+$/.test(rawLast) ? Number(rawLast) : Number.NaN
 
-      perUser.set(ctx.userId, count + 1)
+      perUser.set(caller, count + 1)
       reply.hijack()
       const res = reply.raw
       open.add(res)
@@ -185,9 +189,9 @@ export function registerEventsRoute(app: AppInstance): void {
         clearInterval(recheckTimer)
         unsubscribe()
         open.delete(res)
-        const n = (perUser.get(ctx.userId) ?? 1) - 1
-        if (n <= 0) perUser.delete(ctx.userId)
-        else perUser.set(ctx.userId, n)
+        const n = (perUser.get(caller) ?? 1) - 1
+        if (n <= 0) perUser.delete(caller)
+        else perUser.set(caller, n)
         endStream(res)
       }
       req.raw.on('close', cleanup)

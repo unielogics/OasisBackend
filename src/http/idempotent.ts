@@ -4,6 +4,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { runIdempotent, type IdempotentResult } from '../platform/idempotency.js'
 import type { Tx } from '../platform/db.js'
+import { keyOwnerOf } from './authorizer.js'
 
 export const IDEMPOTENT_HANDLER = Symbol.for('oasis.idempotentHandler')
 
@@ -33,7 +34,7 @@ export function idempotentHandler<Req extends FastifyRequest = FastifyRequest, P
     const header = req.headers['idempotency-key']
     const key = typeof header === 'string' ? header : undefined
     const prepare = o.prepare ? () => o.prepare!(req) : undefined
-    const owner = key ? (req.auth?.userId ?? (o.actor ? await o.actor(req) : `anon:${req.ip}`)) : ''
+    const owner = key ? (req.auth ? keyOwnerOf(req.auth) : o.actor ? await o.actor(req) : `anon:${req.ip}`) : ''
     // The onRequest/preHandler hooks already rejected a missing key on 'required' routes.
     const out = key
       ? await runIdempotent(

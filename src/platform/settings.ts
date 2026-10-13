@@ -195,6 +195,9 @@ export const settingDefs = {
     schema: tintFilms,
     default: [] as z.infer<typeof tintFilms>,
   },
+  // Kiosk mode (ADR 0180): the shop tablet's keypad and kiosk sessions. Off until a manager sets the code, registers the tablet and turns
+  // it on (Settings -> Kiosk, PUT /kiosk/settings); turning it off revokes every kiosk session.
+  'kiosk.enabled': { schema: z.boolean(), default: false },
   // Personal links carry the epoch they were issued in; bumping it kills every link and session at once (incident switch).
   'links.epoch': { schema: z.number().int().min(1).max(1_000_000), default: 1 },
 } as const

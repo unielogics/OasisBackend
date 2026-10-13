@@ -2,7 +2,7 @@
 // calc, client credit, per-event approval rights for the caller). Shared by GET /invoices/:id and every command response.
 import type { Executor } from '../../platform/db.js'
 import { atLabel, clockLabel, toBizDate } from '../../platform/time.js'
-import type { PayActor } from './actor.js'
+import { sameUser, type PayActor } from './actor.js'
 import { statusLabel, type InvoiceCalc } from './calc.js'
 import { clientCreditSummary, type ClientCreditSummary } from './credit-summary.js'
 import { dayLabel } from './ranges.js'
@@ -189,7 +189,7 @@ export function approvalRights(
   if (!actor.has('pay.refund')) return { canApprove: false, block: 'permission' }
   const limit = actor.limit('refund')
   if (limit !== null && limit < e.amount_cents) return { canApprove: false, block: 'limit' }
-  if (e.actor_user_id === actor.userId && limit !== null && !rules.allowSelf)
+  if (sameUser(e.actor_user_id, actor.userId) && limit !== null && !rules.allowSelf)
     return { canApprove: false, block: 'self' }
   return { canApprove: true, block: null }
 }

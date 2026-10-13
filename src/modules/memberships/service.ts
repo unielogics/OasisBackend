@@ -604,7 +604,7 @@ export interface MembershipPatch {
 }
 
 export interface PatchActor {
-  userId: string
+  userId: string | null
   name: string
   audit: AuditContext
 }

@@ -1,6 +1,6 @@
 // The AuthContext the session authorizer produces: the platform's fields plus what the auth/people routes need.
 import type { FastifyRequest } from 'fastify'
-import type { AuthContext } from '../../http/authorizer.js'
+import { isKioskContext, type AuthContext } from '../../http/authorizer.js'
 import { AppError } from '../../platform/errors.js'
 import type { Authority } from '../rbac/service.js'
 
@@ -11,6 +11,8 @@ export interface SessionInfo {
 }
 
 export interface SessionAuthContext extends AuthContext {
+  kind?: 'user'
+  userId: string
   session: SessionInfo
   email: string
   employee: {
@@ -34,10 +36,14 @@ export interface SessionAuthContext extends AuthContext {
 }
 
 export const isSessionContext = (ctx: AuthContext | null | undefined): ctx is SessionAuthContext =>
-  !!ctx && typeof (ctx as Partial<SessionAuthContext>).session === 'object'
+  !!ctx && ctx.kind !== 'kiosk' && typeof (ctx as Partial<SessionAuthContext>).session === 'object'
 
-/** The signed-in session context of a request, or 401 (also when a test authorizer without sessions is installed). */
+/**
+ * The signed-in session context of a request, or 401 (also when a test authorizer without sessions is installed). A kiosk gets 403
+ * KIOSK_SESSION (ADR 0180): every user-only route (the person's own account, team and roles) refuses the shop tablet.
+ */
 export function sessionContext(req: FastifyRequest): SessionAuthContext {
+  if (isKioskContext(req.auth)) throw new AppError('KIOSK_SESSION')
   if (!isSessionContext(req.auth)) throw new AppError('UNAUTHENTICATED')
   return req.auth
 }

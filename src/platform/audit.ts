@@ -17,6 +17,8 @@ export interface AuditContext {
   requestId?: string | null
   idempotencyKey?: string | null
   ip?: string | null
+  /** The kiosk device behind a kiosk request (ADR 0180); audit_log.kiosk_device_id. */
+  kioskDeviceId?: string | null
 }
 
 export interface AuditEntry {
@@ -50,6 +52,7 @@ export async function record(tx: Tx, e: AuditEntry): Promise<number> {
       request_id: c?.requestId ?? null,
       idempotency_key: c?.idempotencyKey ?? null,
       ip: c?.ip && isIP(c.ip) ? c.ip : null,
+      kiosk_device_id: c?.kioskDeviceId ?? null,
     })
     .returning('id')
     .executeTakeFirstOrThrow()

@@ -11,7 +11,7 @@ import { AppError } from '../../platform/errors.js'
 import type { NewId } from '../../platform/ids.js'
 import { getSetting } from '../../platform/settings.js'
 import { addDays, bizDayBounds, toBizDate } from '../../platform/time.js'
-import type { PayActor } from './actor.js'
+import { sameUser, type PayActor } from './actor.js'
 import { adjustPreview, itemsRefundValue, type AdjustInput, type InvoiceCalc } from './calc.js'
 import { creditBalance, loadCreditLots, lockCustomerCredit, recordAllocations } from './credit.js'
 import { buildDetail, type InvoiceDetail, type LedgerEventDto } from './detail.js'
@@ -173,7 +173,7 @@ export class PaymentsService {
 
   private ledgerKey(c: CommandContext, suffix?: string): string | null {
     if (!c.idempotencyKey) return null
-    return `${c.actor.userId}:${c.idempotencyKey}${suffix ? `:${suffix}` : ''}`
+    return `${c.actor.keyOwner ?? c.actor.userId}:${c.idempotencyKey}${suffix ? `:${suffix}` : ''}`
   }
 
   private base(c: CommandContext, inv: InvoiceRow, perm: string, now: Date, suffix?: string): NewEvent {
@@ -648,7 +648,7 @@ export class PaymentsService {
       throw new AppError('CANT_APPROVE', { params: { amount: money(ev.amount_cents) } })
     }
     const allowSelf = (await getSetting(tx, c.locationId, 'approvals.allow_self')).value
-    if (ev.actor_user_id === c.actor.userId && limit !== null && !allowSelf)
+    if (sameUser(ev.actor_user_id, c.actor.userId) && limit !== null && !allowSelf)
       throw new AppError('SELF_APPROVAL')
     const calc = await calcOf(tx, inv.id)
     // Re-validate without this request's own reservation: other refunds may have been resolved since it was requested.

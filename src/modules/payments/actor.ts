@@ -2,14 +2,17 @@
 // authority): the limit of a kind is the highest among the roles that GRANT the permission (null = unlimited, no row =
 // 2500 cents), ledger actor_roles are the names of those roles, and under view-as the REAL person is the actor while the
 // permissions and limits come from the viewed role (src/modules/rbac, ADR 0009).
-import type { AuthContext } from '../../http/authorizer.js'
+import { isKioskContext, principalKey, type AuthContext } from '../../http/authorizer.js'
 import { isSessionContext } from '../auth/context.js'
 import { DEFAULT_LIMIT_CENTS, type LimitKind } from '../rbac/catalog.js'
 import { roleLimit } from '../rbac/engine.js'
 
 export interface PayActor {
-  userId: string
+  /** null for a kiosk (ADR 0180): the tapped employee is employeeId. */
+  userId: string | null
   employeeId: string | null
+  /** Who owns the caller's idempotency keys: the real user, or `kiosk:<device id>` for a kiosk (never null, never shared). */
+  keyOwner?: string
   name: string
   viewAsRoleId: string | null
   has(perm: string): boolean
@@ -23,6 +26,10 @@ export interface PayActor {
 
 const join = (names: readonly string[]): string => names.join(' + ')
 
+/** The same person on both sides: a missing user id never matches another missing one (a kiosk has none, ADR 0180). */
+export const sameUser = (a: string | null | undefined, b: string | null | undefined): boolean =>
+  a !== null && a !== undefined && a === b
+
 export function actorFromAuth(ctx: AuthContext): PayActor {
   const has = (perm: string): boolean => ctx.permissions.has('*') || ctx.permissions.has(perm)
   const session = isSessionContext(ctx) ? ctx : null
@@ -30,6 +37,7 @@ export function actorFromAuth(ctx: AuthContext): PayActor {
   const actor: PayActor = {
     userId: ctx.realUserId ?? ctx.userId,
     employeeId: ctx.employeeId,
+    keyOwner: isKioskContext(ctx) ? principalKey(ctx) : (ctx.realUserId ?? ctx.userId ?? 'anonymous'),
     name: ctx.actorName ?? 'Unknown',
     viewAsRoleId: ctx.viewAsRoleId ?? null,
     has,

@@ -77,6 +77,23 @@ export const LIMITED_PERMISSION: Readonly<Record<string, LimitKind>> = Object.fr
 /** Only a Super Admin may grant these (role grant or per-person Allow exception). */
 export const SUPER_ONLY_PERMISSIONS: ReadonlySet<string> = new Set(['set.billing', 'pay.void'])
 
+/**
+ * The kiosk's permission set (ADR 0180): built in, not a role row, never assignable and never shown in the roles matrix. An unlocked
+ * shop tablet runs the operations board, takes payments, makes bookings and walk-ins, texts clients and reads client files; refunds,
+ * voids, adjustments, credits, reports, Settings, team, memberships and cancel/no-show stay behind the hidden manager sign-in. The
+ * kiosk's route list (src/modules/kiosk/allowlist.ts) narrows it further, route by route.
+ */
+export const KIOSK_PERMISSIONS: ReadonlySet<string> = new Set([
+  'sched.view',
+  'sched.edit',
+  'jobs.status',
+  'jobs.checklist',
+  'cli.view',
+  'cli.contact',
+  'pay.collect',
+  'msg.send',
+])
+
 export const SKILLS = [
   'Interior detailing',
   'Paint correction',
