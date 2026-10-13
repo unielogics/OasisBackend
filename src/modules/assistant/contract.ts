@@ -35,6 +35,7 @@ import type { JsonValue } from '../../platform/schema.js'
 import type { PublicTier } from '../public/tiers.js'
 import type { Actor, SchedulingCtx } from '../scheduling/context.js'
 import type { ShopKnowledge } from './knowledge/render.js'
+import type { ToolPolicy } from './policy.js'
 import type { ConvoLang } from './lang.js'
 import type { ActionCodeHandler, NewTexters } from './ports.js'
 
@@ -378,6 +379,8 @@ export type ToolHandoffReason =
   | 'no_payment_link'
   /** The client texted a photo and the reply says the team will review it (W4b X8: the AI cannot see pictures). */
   | 'photo_quote'
+  /** ADR 0174 §3b: a Spanish text while the owner hands Spanish chats to the team (Settings → Oasis AI → Limits & tone). */
+  | 'language'
 
 export interface HandoffRequest {
   reason: ToolHandoffReason
@@ -456,6 +459,11 @@ export interface ToolContext {
    * absent, the tools read the conversation's stored language (conversationVoice), as before ADR 0174.
    */
   lang?: ConvoLang
+  /**
+   * ADR 0174 §3b: the owner's limits (the link kinds send_link may text, open times, the account lookups). Absent: every ability on
+   * (the tools' own suites build a context without it). The runner refuses what they switch off; the tools check them again.
+   */
+  policy?: ToolPolicy
 }
 
 /** A proposal to record and text (propose_booking / propose_reschedule / propose_cancel; identity/pending-actions.ts). */
@@ -568,7 +576,7 @@ export interface ToolInputs {
     tier: PublicTier | null
   }
   opt_out: Record<string, never>
-  handoff_to_staff: { reason: Exclude<ToolHandoffReason, 'late_cancel' | 'no_payment_link'>; summary: string }
+  handoff_to_staff: { reason: Exclude<ToolHandoffReason, 'late_cancel' | 'no_payment_link' | 'language'>; summary: string }
 }
 
 /**

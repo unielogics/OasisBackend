@@ -34,16 +34,17 @@ import type { Actor, SchedulingCtx } from '../scheduling/context.js'
 import { AI_ACTOR_NAME, type AssistantLog, type AssistantQueue, type ShopFactsSource, type ToolContext, type ToolOutcome, type ToolRegistry, type TurnIdentity } from './contract.js'
 import type { AssistantConfig } from './config.js'
 import { appointmentRefs, loadAppointmentRefs, loadConversation, loadTurnContext, resolveIdentity } from './context.js'
-import { runEngine, TurnAbort, ZERO_USAGE, type ConversationRecord } from './engine.js'
+import { runEngine, TurnAbort, ZERO_USAGE, type ConversationRecord, type EngineResult } from './engine.js'
 import { renderShopFacts } from './facts.js'
 import { renderShopKnowledge } from './knowledge/render.js'
-import { looksLikeCardNumber } from './guard.js'
-import { CARD_LINES, detectLanguage, isConvoLang, SAFETY_LINES, storeLanguage, withDisclosure, type ConvoLang } from './lang.js'
+import { looksLikeCardNumber, toGsm7 } from './guard.js'
+import { CARD_LINES, detectLanguage, isConvoLang, SAFETY_LINES, SPANISH_HANDOFF_TEXT, storeLanguage, withDisclosure, type ConvoLang } from './lang.js'
 import { whenWords } from './tools/common.js'
 import { liveToolEffects } from './tools/effects-live.js'
 import { HANDOFF_SUMMARIES, markUnanswered, openTurnHandoff, recipientOf, sendFallback, type ConversationRef, type HandoffDeps } from './handoff.js'
 import type { AssistantGate, AssistantInbox } from './ports.js'
-import { asksForFree, buildSystem, declinesPlans, PROMPT_VERSION, renderConversation, renderTurnContext } from './prompt.js'
+import { allLinkKinds, loadPolicy, policyHash } from './policy.js'
+import { asksForFree, buildSystem, declinesPlans, PROMPT_VERSION, renderConversation, renderOwnerBlock, renderTurnContext } from './prompt.js'
 import { liveRecorder, NON_PROGRESS_TOOLS, offeredTools, recordLine, toolSpecs } from './tool-runner.js'
 import { Transcript } from './transcript.js'
 import { TurnLinks } from './turn-links.js'
@@ -168,6 +169,8 @@ export function composeReply(o: {
   safety?: boolean
   card?: boolean
   lang?: ConvoLang
+  /** ADR 0174 §3b: the owner's sign-off, appended by the server after everything else of the reply (the judge never read it). */
+  signOff?: string
 }): {
   text: string
   klass: 'ai_reply' | 'personal_link'
@@ -179,6 +182,8 @@ export function composeReply(o: {
   for (const p of o.links.keys()) if (!reply.includes(p)) reply = `${reply} ${p}`
   if (o.safety) reply = `${reply} ${SAFETY_LINES[lang]}`
   if (o.card) reply = `${reply} ${CARD_LINES[lang]}`
+  const signOff = o.signOff ? toGsm7(o.signOff.replace(/\s+/g, ' ').trim()) : ''
+  if (signOff) reply = `${reply} ${signOff}`
   // the first AI text of the conversation: the disclosure and the STOP footer, in the conversation's language (W4b X5)
   const text =
     lang === 'en'
@@ -366,6 +371,8 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   const loc = conv.location_id
   const facts = await d.facts.get(loc)
   const actionsEnabled = d.cfg.actionsEnabled && (await getSetting(d.db, loc, 'assistant.actions_enabled')).value
+  // ADR 0174 §3b: the owner's limits and tone (the defaults are today's behaviour)
+  const policy = await loadPolicy(d.db, loc, actionsEnabled)
   const refRows = await loadAppointmentRefs(d.db, { locationId: loc, customerId: identity0.customerId, now })
   const snap = await loadConversation(d.db, {
     locationId: loc,
@@ -380,8 +387,13 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   // the client's language (W4b X5): what their new texts are written in, else what the conversation was in (English by default)
   const freshClient = snap.lines.filter((l) => l.fresh && l.who === 'client').map((l) => l.text)
   const detected = detectLanguage(freshClient)
-  const lang: ConvoLang = detected ?? (isConvoLang(claim.conv.language) ? claim.conv.language : 'en')
+  const clientLang: ConvoLang = detected ?? (isConvoLang(claim.conv.language) ? claim.conv.language : 'en')
   if (detected) await storeLanguage(d.db, conv.id, detected)
+  // ADR 0174 §3b, Spanish: "english" answers a Spanish texter in English (the server's parts too); "handoff" answers with the
+  // server's fixed Spanish line and hands the chat to the team, without a model call
+  const englishOnly = clientLang === 'es' && policy.behavior.spanish === 'english'
+  const spanishHandoff = clientLang === 'es' && policy.behavior.spanish === 'handoff'
+  const lang: ConvoLang = englishOnly ? 'en' : clientLang
   const loaded = await loadTurnContext(d.db, {
     resolved,
     conversationId: conv.id,
@@ -400,15 +412,25 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     language: lang,
     ...(asksForFree(freshClient) ? { asksFree: true } : {}),
     ...(declinedPlans ? { declinedPlans: true } : {}),
+    limits: policy.tools,
+    ...(englishOnly ? { englishOnly: true } : {}),
   }
-  // ADR 0174: the owner's active knowledge ('' without any: the prompt is then exactly what it was before)
+  // ADR 0174: the owner's active knowledge ('' without any: the prompt is then exactly what it was before) and (§3b) the owner
+  // block ('' with the default limits and tone)
   const knowledgeText = renderShopKnowledge(facts)
-  const contextText = renderTurnContext(knowledgeText ? { ...turnContext, knowledge: true } : turnContext)
-  const tools = offeredTools(d.registry, actionsEnabled)
-  const specs = toolSpecs(tools)
+  const ownerText = renderOwnerBlock(policy)
+  const contextText = renderTurnContext({ ...turnContext, ...(knowledgeText ? { knowledge: true } : {}), ...(ownerText ? { owner: true } : {}) })
+  const tools = offeredTools(d.registry, policy.tools)
+  const specs = toolSpecs(tools, policy.tools)
   const factsText = renderShopFacts(facts)
-  const system = buildSystem({ factsText, contextText, knowledgeText })
-  transcript.add({ kind: 'system', promptVersion: PROMPT_VERSION, factsVersion: facts.version, tools: tools.map((t) => t.name) })
+  const system = buildSystem({ factsText, contextText, knowledgeText, ownerText })
+  transcript.add({
+    kind: 'system',
+    promptVersion: PROMPT_VERSION,
+    factsVersion: facts.version,
+    tools: tools.map((t) => t.name),
+    ...(ownerText || !allLinkKinds(policy.tools) ? { policy: policyHash(policy) } : {}),
+  })
   transcript.add({ kind: 'context', text: contextText })
   const messages: AiMessage[] = [{ role: 'user', content: [{ type: 'text', text: renderConversation(snap.lines) }] }]
   transcript.add({ kind: 'message', message: messages[0]! })
@@ -476,11 +498,26 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     // ADR 0174 §4b: the tools write through the live effects, and their own words follow the language this turn answers in
     effects: liveToolEffects,
     lang,
+    // ADR 0174 §3b: the owner's limits, checked again by the tools
+    policy: policy.tools,
+  }
+  // read once the tool rounds are done (a tool of this turn may change them): a card number in the new texts, the reply numbers
+  // executed since the last reply (W4b X3), the conversation's record (W4 final check L1)
+  const afterTools = async () => {
+    const card =
+      snap.inboxIds.length > 0 &&
+      (await d.db.selectFrom('sms_inbox').select('body').where('id', 'in', snap.inboxIds).execute()).some((x) => looksLikeCardNumber(x.body))
+    const executed = await executedSinceLastReply(d.db, { conversationId: conv.id, turnId, now, tz })
+    const earlier = await conversationRecord(d.db, { locationId: loc, conversationId: conv.id, turnId, phone: conv.phone_e164, now, tz })
+    return { card, executed, earlier }
   }
 
   try {
     // ---- the engine (engine.ts): the Converse loop, the output guard and the policy judge; it writes nothing but the call rows
-    const r = await runEngine(
+    // (ADR 0174 §3b: a Spanish text while the owner hands Spanish chats to the team gets the server's fixed line, no model call)
+    const r: EngineResult = spanishHandoff
+      ? await spanishHandoffReply(transcript, afterTools)
+      : await runEngine(
       {
         cfg: d.cfg,
         provider: d.provider,
@@ -512,16 +549,9 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
         signal: deadline.signal,
         deadlineAt,
         transcript,
-        // read once the tool rounds are done (a tool of this turn may change them): a card number in the new texts, the reply
-        // numbers executed since the last reply (W4b X3), the conversation's record (W4 final check L1)
-        afterTools: async () => {
-          const card =
-            snap.inboxIds.length > 0 &&
-            (await d.db.selectFrom('sms_inbox').select('body').where('id', 'in', snap.inboxIds).execute()).some((x) => looksLikeCardNumber(x.body))
-          const executed = await executedSinceLastReply(d.db, { conversationId: conv.id, turnId, now, tz })
-          const earlier = await conversationRecord(d.db, { locationId: loc, conversationId: conv.id, turnId, phone: conv.phone_e164, now, tz })
-          return { card, executed, earlier }
-        },
+        afterTools,
+        policy,
+        freshClientTexts: freshClient,
       },
     )
     judgeUsage = r.judgeUsage
@@ -553,6 +583,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
         safety,
         card,
         lang,
+        signOff: r.kind === 'reply' && r.handoff?.reason !== 'language' ? policy.behavior.signOff : '',
       })
       const queued = superseded
         ? null
@@ -647,6 +678,29 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     return { status: 'failed', turnId, reason: out.error ?? 'failed' }
   } finally {
     clearTimeout(timer)
+  }
+}
+
+/**
+ * ADR 0174 §3b, Spanish "handoff": the server's fixed Spanish line (the disclosure on a first text, the card line when the texts
+ * held a card number) and a handoff (reason `language`), as a reply of the engine's shape. No model or judge call: no cost.
+ */
+async function spanishHandoffReply(transcript: Transcript, afterTools: () => Promise<{ card: boolean }>): Promise<EngineResult> {
+  const { card } = await afterTools()
+  transcript.add({ kind: 'guard', verdict: 'spanish_handoff' })
+  return {
+    kind: 'reply',
+    reply: SPANISH_HANDOFF_TEXT,
+    replyRaw: SPANISH_HANDOFF_TEXT,
+    rendered: [],
+    safety: false,
+    card,
+    handoff: { reason: 'language', summary: HANDOFF_SUMMARIES.language! },
+    usage: ZERO_USAGE,
+    judgeUsage: ZERO_USAGE,
+    model: null,
+    rounds: 0,
+    stop: null,
   }
 }
 

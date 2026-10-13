@@ -62,7 +62,8 @@ export function redactJson(v: unknown): JsonValue {
 }
 
 export type TranscriptEntry =
-  | { kind: 'system'; promptVersion: string; factsVersion: string; tools: string[] }
+  /** `policy`: ADR 0174 §3b, the fingerprint of the owner's limits and tone when they changed the prompt or the tools. */
+  | { kind: 'system'; promptVersion: string; factsVersion: string; tools: string[]; policy?: string }
   | { kind: 'context'; text: string }
   | { kind: 'message'; message: AiMessage; stopReason?: string; usage?: Record<string, number> }
   | { kind: 'tools'; round: number; calls: { tool: string; outcome: string; error?: string }[] }

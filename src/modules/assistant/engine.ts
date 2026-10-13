@@ -28,7 +28,8 @@ import {
 import { toBizDate } from '../../platform/time.js'
 import type { AnyAssistantTool, AssistantLog, HandoffRequest, ShopFacts, ToolContext, ToolRegistry } from './contract.js'
 import type { AssistantConfig } from './config.js'
-import { CONFIRM_PLACEHOLDER, factLiterals, openingWindow, placeholderValues } from './facts.js'
+import { CONFIRM_PLACEHOLDER, factLiterals, oneLine, openingWindow, placeholderValues } from './facts.js'
+import { allLinkKinds, handoffTopicIn, phrasesIn, type AssistantPolicy, type ToolPolicy } from './policy.js'
 import {
   cutAfterFirstQuestion,
   cutAtSentence,
@@ -42,7 +43,7 @@ import {
   type GuardProblem,
   type ReplySegment,
 } from './guard.js'
-import { CARD_LINES, FALLBACK_TEXTS, SAFETY_LINES, type ConvoLang } from './lang.js'
+import { CARD_LINES, FALLBACK_TEXTS, SAFETY_LINES, TOPIC_HANDOFF_TEXTS, type ConvoLang } from './lang.js'
 import { JUDGE_HINTS, runJudge } from './judge.js'
 import { judgeRewriteInstruction, REPLY_NOW_TEXT, rewriteInstruction, type TurnContextData } from './prompt.js'
 import { runToolRound, type RecordCall } from './tool-runner.js'
@@ -134,6 +135,13 @@ export interface EngineInput {
   deadlineAt: number
   transcript: Transcript
   afterTools(): Promise<AfterTools>
+  /**
+   * ADR 0174 §3b: the owner's limits and tone (the runner refuses what they switch off, the guard checks the words to avoid, the
+   * handoff topics have their server backstop, the sign-off's room is kept). Absent: the defaults (today's behaviour).
+   */
+  policy?: AssistantPolicy
+  /** The client's texts this turn answers (the handoff-topic backstop reads them). */
+  freshClientTexts?: readonly string[]
 }
 
 interface EngineMeter {
@@ -271,7 +279,10 @@ export async function runEngine(d: EngineDeps, i: EngineInput): Promise<EngineRe
           if (said) handoffText = said
         }
         rounds += 1
-        const r = await runToolRound({ nowMs, record: d.recordCall }, { registry: d.registry, ctx, uses, round: rounds, seq, actionsEnabled })
+        const r = await runToolRound(
+          { nowMs, record: d.recordCall },
+          { registry: d.registry, ctx, uses, round: rounds, seq, actionsEnabled, ...(i.policy ? { policy: i.policy.tools } : {}) },
+        )
         seq = r.seq
         if (r.balanceCents !== null) balanceCents = r.balanceCents
         if (r.confirmTexted) confirmTexted = true
@@ -296,7 +307,7 @@ export async function runEngine(d: EngineDeps, i: EngineInput): Promise<EngineRe
       // this turn goes back to the model ONCE, tools on: send it now or reply without offering it
       if (!final && !linkNudged && links.size === 0 && tools.some((t) => t.name === 'send_link') && (offersLink(text, { statement: true }) || (offersLink(text) && lastAiOffered))) {
         linkNudged = true
-        messages.push({ role: 'user', content: [{ type: 'text', text: LINK_NUDGE_TEXT }] })
+        messages.push({ role: 'user', content: [{ type: 'text', text: linkNudgeText(i.policy?.tools) }] })
         transcript.add({ kind: 'message', message: messages[messages.length - 1]! })
         text = null
         continue
@@ -329,7 +340,10 @@ export async function runEngine(d: EngineDeps, i: EngineInput): Promise<EngineRe
   const card = after.card
   const safetyLine = SAFETY_LINES[lang]
   const cardLine = CARD_LINES[lang]
-  const maxChars = MAX_REPLY_CHARS - (safety ? safetyLine.length + 1 : 0) - (card ? cardLine.length + 1 : 0)
+  // ADR 0174 §3b: the owner's sign-off is appended by the server after the judge (composeReply): its room is kept
+  const signOff = i.policy?.behavior.signOff.trim() ?? ''
+  const avoidWords = i.policy?.behavior.avoidWords ?? []
+  const maxChars = MAX_REPLY_CHARS - (safety ? safetyLine.length + 1 : 0) - (card ? cardLine.length + 1 : 0) - (signOff ? signOff.length + 1 : 0)
   // W4b X3: only after an executed action may the reply say it is booked, moved, cancelled or "all set"; the judge reads the same
   // record and the client's visits
   const executed = after.executed
@@ -476,6 +490,7 @@ export async function runEngine(d: EngineDeps, i: EngineInput): Promise<EngineRe
         // W4 final check L6: an unverified phone's open times and "you're verified" (one rewrite; then the judge's)
         checkAvailabilityClaims: noTimes && !rewriteUsed ? { dayChecked } : null,
         ...(!verified && !rewriteUsed ? { phoneVerified: false } : {}),
+        ...(avoidWords.length > 0 ? { avoidWords } : {}),
       })
       transcript.add({ kind: 'guard', verdict: v.kind, ...(v.kind === 'fix' ? { problems: v.problems, ...(v.words.length > 0 ? { words: v.words } : {}) } : {}) })
       if (v.kind === 'ok') {
@@ -505,7 +520,11 @@ export async function runEngine(d: EngineDeps, i: EngineInput): Promise<EngineRe
       const hard = v.problems.filter((p) => HARD_PROBLEMS.has(p))
       if (
         hard.length > 0 ||
-        ((v.problems.includes('questions') || v.problems.includes('action_claim') || v.problems.includes('unverified_claim')) && !rewriteUsed)
+        ((v.problems.includes('questions') ||
+          v.problems.includes('action_claim') ||
+          v.problems.includes('unverified_claim') ||
+          v.problems.includes('avoid_word')) &&
+          !rewriteUsed)
       ) {
         // the rewrite still trips only the placement rule: the server isolates the placeholders itself, once (each its own sentence)
         if (rewriteUsed && !isolateUsed && hard.length === 1 && hard[0] === 'placement') {
@@ -519,6 +538,17 @@ export async function runEngine(d: EngineDeps, i: EngineInput): Promise<EngineRe
         rewriteUsed = true
         draft = await fix(v.text, v.problems, v.words)
         continue
+      }
+      // ADR 0174 §3b: a word to avoid that survived the rewrite: the sentences holding it go, if anything is left; else the fallback
+      if (v.problems.includes('avoid_word')) {
+        const kept = sentencesOf(v.text).filter((x) => phrasesIn(x, avoidWords).length === 0).join(' ').trim()
+        transcript.add({ kind: 'guard', verdict: 'avoid_word_cut', problems: ['avoid_word'] })
+        if (kept !== '' && kept !== v.text.trim()) {
+          draft = kept
+          continue
+        }
+        if (toConfirmOnly('guard:avoid_word')) continue
+        return handoff({ reason: 'guard', status: 'handed_off', error: 'guard:avoid_word' })
       }
       if (v.problems.includes('questions')) {
         draft = cutAfterFirstQuestion(v.text)
@@ -539,6 +569,16 @@ export async function runEngine(d: EngineDeps, i: EngineInput): Promise<EngineRe
     return handoff({ reason: 'fallback', status: 'failed', error: reason })
   }
   if (reply === null) return handoff({ reason: 'guard', status: 'handed_off', error: 'guard:unresolved' })
+  // ADR 0174 §3b: the handoff topics' server backstop. The client's new texts name a topic the owner always hands to the team and
+  // the model did not hand off: the fixed handoff line replaces its reply (no link, no rendering), and the handoff opens.
+  const topic = links.requested() ? null : handoffTopicIn(i.freshClientTexts ?? [], i.policy?.behavior.handoffTopics ?? [])
+  if (topic !== null) {
+    links.drop()
+    links.handoff('policy', `The client asked about "${oneLine(topic, 80)}" (Settings → Oasis AI: always hand to the team).`)
+    transcript.add({ kind: 'guard', verdict: 'handoff_topic', problems: ['handoff_topic'] })
+    const line = TOPIC_HANDOFF_TEXTS[lang]
+    return { kind: 'reply', reply: line, replyRaw: line, rendered: [], safety: false, card, handoff: links.handoffRequest, ...meter() }
+  }
   // W4b X8: the client texted a photo and the reply says the team will review it: a person is asked to (the AI cannot see it)
   if (i.photo && TEAM_REVIEW.test(reply))
     links.requestHandoff({
@@ -561,6 +601,15 @@ export async function runEngine(d: EngineDeps, i: EngineInput): Promise<EngineRe
 /** A reply that tells the client the team will look at what they sent (W4b X8: a photo then opens a handoff). */
 export const TEAM_REVIEW =
   /\b(?:team|staff|someone|a person|technician|we(?:'ll| will))\b[^.!?]{0,60}\b(?:review|look|check|see|get back|text you|quote|estimate)|\b(?:equipo|alguien)\b[^.!?]{0,60}\b(?:revis|mira|cotiz|te escrib|te contact)/i
+
+/**
+ * The link nudge under the owner's limits (ADR 0174 §3b): every link kind offered, LINK_NUDGE_TEXT itself; otherwise a version that
+ * names no kind (the model must not be pushed toward a kind that is switched off).
+ */
+export function linkNudgeText(p?: ToolPolicy): string {
+  if (!p || allLinkKinds(p)) return LINK_NUDGE_TEXT
+  return 'Your reply offers a link but none was sent in this turn. If a link of a kind send_link offers helps, call send_link now and write your reply with its placeholder; otherwise write the reply again without offering a link.'
+}
 
 /** W4 final check L7: what the model is told when its reply offers a link that no tool sent in this turn. */
 export const LINK_NUDGE_TEXT =

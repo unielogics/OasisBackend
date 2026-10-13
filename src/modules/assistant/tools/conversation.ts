@@ -4,6 +4,7 @@ import { z } from 'zod/v4'
 import { TOOL_MIN_TRUST, type AssistantTool, type ToolContext, type ToolInputs, type ToolOutcome } from '../contract.js'
 import { atLeast, fail, json, ok, withHandoff } from './common.js'
 import { effectsOf } from './effects-live.js'
+import { POLICY_OFF_MESSAGE } from '../tool-runner.js'
 
 export const noteInterest: AssistantTool<ToolInputs['note_interest']> = {
   name: 'note_interest',
@@ -41,6 +42,8 @@ export const sendLink: AssistantTool<ToolInputs['send_link']> = {
  * re-text (`retext: false`: a link of the hour is pointed to, not texted again; only send_link re-texts, when the client asks).
  */
 export async function issueLinkOutcome(ctx: ToolContext, input: ToolInputs['send_link'], o: { retext?: boolean } = {}): Promise<ToolOutcome> {
+  // ADR 0174 §3b: a kind the owner switched off is never texted (the runner refuses it too; check_availability asks for calendar)
+  if (ctx.policy && !ctx.policy.linkKinds.has(input.kind)) return fail('not_allowed', POLICY_OFF_MESSAGE)
   if (!ctx.env.PUBLIC_LINKS_ENABLED)
     return fail(
       'unavailable',

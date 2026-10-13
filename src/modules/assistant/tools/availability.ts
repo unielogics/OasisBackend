@@ -120,6 +120,10 @@ const LINK_TEXTED_RULE =
 const LINK_RULE =
   'This phone cannot book by text yet, so the client picks the time on the booking page: put the link placeholder in your reply, e.g. "Here\u2019s your link to pick a time: {link1}" (or send_link kind verify if they want to book here by text). Do not list or offer specific times and do not ask them to pick a time in the chat.'
 
+/** check_availability's answer to a phone that cannot book in the chat while the owner switched booking links off (ADR 0174 §3b). */
+export const BOOKING_LINKS_OFF_RULE =
+  'Booking links are switched off by the shop, so this phone cannot pick a time here: say a team member will text them to set up the visit and call handoff_to_staff (reason cannot_help). Do not list or offer specific times and do not ask them to pick a time in the chat.'
+
 async function linkInsteadOfTimes(
   ctx: ToolContext,
   d: {
@@ -146,6 +150,9 @@ async function linkInsteadOfTimes(
     hasOpenTimes: d.open,
     openParts: [...d.openParts],
   }
+  // ADR 0174 §3b: booking links off: no link and no times; the team sets the visit up
+  if (ctx.policy && !ctx.policy.linkKinds.has('calendar'))
+    return ok(json({ ...day, bookingLink: null, instruction: BOOKING_LINKS_OFF_RULE }))
   let placeholder = issuedLinks.get(ctx) ?? null
   if (!placeholder) {
     const link = await issueLinkOutcome(ctx, { kind: 'calendar', appointmentRef: null, tier: null }, { retext: false })

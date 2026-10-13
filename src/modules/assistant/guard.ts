@@ -50,6 +50,7 @@
 import { isGsm7Char, normalizeForSms } from '../../integrations/sms/gsm.js'
 import { holdsCardNumber } from '../messaging/inbound/cards.js'
 import { CARD_LINES, SAFETY_LINES } from './lang.js'
+import { phrasesIn } from './policy.js'
 
 /** The longest reply (characters, after rendering; {linkN} counted as written). */
 export const MAX_REPLY_CHARS = 320
@@ -93,6 +94,12 @@ export type GuardProblem =
    * phone is not.
    */
   | 'unverified_claim'
+  /**
+   * ADR 0174 §3b: a word or phrase the owner listed to avoid (Settings → Oasis AI → Limits & tone), in the model's own words (the
+   * placeholders out; case, accents and punctuation ignored; whole words). Soft: one rewrite, then the sentences that hold it are
+   * dropped, else the fallback.
+   */
+  | 'avoid_word'
 
 /** Problems only a rewrite can fix; a reply that still has one after the rewrite becomes the fallback. */
 export const HARD_PROBLEMS: ReadonlySet<GuardProblem> = new Set(['empty', 'unknown_placeholder', 'placement', 'money', 'digits', 'secret', 'url', 'meta'])
@@ -164,6 +171,8 @@ export interface GuardInput {
   checkAvailabilityClaims?: { dayChecked: boolean } | null
   /** W4 final check L6: false while the phone is not verified: "you're verified" is a false claim. Unset: not checked. */
   phoneVerified?: boolean
+  /** ADR 0174 §3b: the owner's words to avoid (assistant.behavior.avoidWords). Unset or empty: not checked. */
+  avoidWords?: readonly string[]
 }
 
 /** Markdown and list syntax out, one line; a line break that ends a line without punctuation becomes a full stop (a clause end). */
@@ -825,6 +834,10 @@ const META = new RegExp(
     "\\b(?:the\\s+(?:client|user)|el\\s+(?:cliente|usuario)|la\\s+(?:clienta|usuaria))(?:'s)?\\s+(?:has|hasn'?t|had|is|isn'?t|was|wasn'?t|wants?|said|asked|did|didn'?t|does|doesn'?t|needs?|seems|may|might|will|would|can|could|no|ya|quiere|dijo|pidio|pregunto|necesita|parece|todavia|aun|aún|tiene|esta|está)\\b",
     '\\blet\\s+me\\s+(?:redo|rewrite|revise|rephrase|try\\s+(?:that\\s+)?again)\\b',
     '\\b(?:plain\\s+text\\s+only|no\\s+emojis?)\\b',
+    // ADR 0174 §3b: the owner's knowledge named as a source ("the shop knowledge says", "according to the corrections")
+    '\\bshop\\s+knowledge\\b',
+    "\\b(?:the|my|our)\\s+(?:knowledge(?:\\s+base)?|corrections?|documents?|owner(?:'s)?\\s+notes?)\\s+(?:says?|said|mentions?|lists?|states?|shows?|covers?|doesn'?t|does\\s+not|don'?t|do\\s+not)\\b",
+    '\\baccording\\s+to\\s+(?:the|my)\\s+(?:knowledge|corrections?|documents?|owner(?:\'s)?\\s+notes?)\\b',
   ].join('|'),
   'i',
 )
@@ -964,6 +977,7 @@ export function guardReply(i: GuardInput): GuardVerdict {
   if (i.checkAvailabilityClaims || i.phoneVerified === false)
     flag('unverified_claim', unverifiedClaims(raw, { availability: i.checkAvailabilityClaims ?? null, ...(i.phoneVerified === false ? { verified: false } : {}) }))
   flag('meta', metaNotes(raw))
+  if (i.avoidWords && i.avoidWords.length > 0) flag('avoid_word', phrasesIn(raw, i.avoidWords))
   // the form: one question, the length after rendering
   const rendered = toGsm7(renderPlaceholders(text, values))
   if ((rendered.match(/\?/g) ?? []).length > 1) problems.push('questions')
@@ -992,6 +1006,7 @@ export const PROBLEM_HINTS: Record<GuardProblem, string> = {
   meta: 'Write only the text the client reads, to them: never a note about "the client", your reasoning, a correction of your own draft or a rule about how to write.',
   unverified_claim:
     'This phone is not verified and the server gave you no open times: never name a time, a day or a part of a day as open, available, working or good (the booking link shows the open times), not even in a sentence about the link ("pick a time on the link", never "pick 3 PM on the link" or "pick a Friday afternoon time"), and never say they are verified (they are not). Point them to the booking link, or to the verify link to book by text.',
+  avoid_word: 'The shop asked you never to use some words or phrases: write the text again without them (the list follows), in other plain words.',
   action_claim:
     'Nothing was booked, moved or cancelled by the server: never say it is booked, confirmed, moved, cancelled, reserved, done or "all set". To book or change it, give the booking link (send_link) or, for a verified phone, propose it and write "{confirm}."; a visit the client already has reads "you have <service> on <day> at <time>".',
 }

@@ -174,4 +174,6 @@ export const HANDOFF_SUMMARIES: Record<string, string> = {
   'cap:global_hour': 'The assistant reached its hourly limit for the shop.',
   'cap:global_day': 'The assistant reached its daily limit for the shop: it is off until tomorrow.',
   'cap:budget': 'The assistant reached its daily budget: it is off until tomorrow.',
+  // ADR 0174 §3b (Settings → Oasis AI → Limits & tone)
+  language: 'The client writes in Spanish: Settings → Oasis AI hands Spanish chats to the team.',
 }

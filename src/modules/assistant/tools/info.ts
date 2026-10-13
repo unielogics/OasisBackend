@@ -122,7 +122,8 @@ export const getMembershipInfo: AssistantTool<ToolInputs['get_membership_info']>
       perks: p.perks,
     }))
     let mine: Record<string, unknown> | null = null
-    if (ctx.identity.customerId && atLeast(ctx.identity.trust, 'caller')) {
+    // ADR 0174 §3b: account questions off, the client's own membership status is not looked up
+    if (ctx.identity.customerId && atLeast(ctx.identity.trust, 'caller') && ctx.policy?.accountInfo !== false) {
       const customer = await findCustomerByPhone(ctx.db, ctx.identity.phone)
       if (customer && customer.id === ctx.identity.customerId) {
         const v = await memberView(ctx.db, ctx.identity.locationId, customer)

@@ -8,6 +8,7 @@ import type { Db } from '../../platform/db.js'
 import type { NewId } from '../../platform/ids.js'
 import type { AnyAssistantTool, HandoffRequest, ToolContext, ToolOutcome, ToolRegistry, TurnTrust } from './contract.js'
 import { oneLine } from './facts.js'
+import { allLinkKinds, LINK_KINDS, type LinkKind, type ToolPolicy } from './policy.js'
 import { redactJson } from './transcript.js'
 import './schema.js'
 
@@ -16,9 +17,33 @@ const RANK: Record<TurnTrust, number> = { unknown: 0, caller: 1, trusted: 2 }
 /** True when `have` is at least `need`. */
 export const trustAtLeast = (have: TurnTrust, need: TurnTrust): boolean => RANK[have] >= RANK[need]
 
-/** The tools offered to the model this turn, in the registry's fixed order (action tools only while actions are on). */
-export function offeredTools(registry: ToolRegistry, actionsEnabled: boolean): AnyAssistantTool[] {
-  return registry.tools.filter((t) => actionsEnabled || !t.action)
+/**
+ * Whether the owner's limits offer a tool (ADR 0174 §3b): the action tools while in-chat actions are on, check_availability with
+ * open times, the account lookups (get_balance, list_my_appointments) with account questions or while actions need the refs,
+ * send_link while any link kind is offered. Every other tool is always offered (the intake, STOP and the handoff are hard rules).
+ */
+export function toolAllowed(tool: Pick<AnyAssistantTool, 'name' | 'action'>, p: ToolPolicy): boolean {
+  if (tool.action) return p.actions
+  switch (tool.name) {
+    case 'check_availability':
+      return p.availability
+    case 'get_balance':
+    case 'list_my_appointments':
+      return p.accountInfo || p.actions
+    case 'send_link':
+      return p.linkKinds.size > 0
+    default:
+      return true
+  }
+}
+
+/**
+ * The tools offered to the model this turn, in the registry's fixed order: action tools only while actions are on (a boolean: the
+ * actions switch alone, as before ADR 0174), and with the owner's limits (a ToolPolicy) only what they offer.
+ */
+export function offeredTools(registry: ToolRegistry, policy: boolean | ToolPolicy): AnyAssistantTool[] {
+  if (typeof policy === 'boolean') return registry.tools.filter((t) => policy || !t.action)
+  return registry.tools.filter((t) => toolAllowed(t, policy))
 }
 
 /** The strict JSON Schema of a tool's zod input, for Converse. */
@@ -28,9 +53,43 @@ export function inputSchemaOf(tool: AnyAssistantTool): AiJsonObject {
   return schema as AiJsonObject
 }
 
-export function toolSpecs(tools: readonly AnyAssistantTool[]): AiToolSpec[] {
-  return tools.map((t) => ({ name: t.name, description: t.description, inputSchema: inputSchemaOf(t) }))
+/**
+ * The tools as Converse reads them. With the owner's limits, send_link offers only the kinds they allow: its `kind` enum is narrowed
+ * and its description is built from fixed per-kind sentences (stable bytes for a given policy); every kind on, it is the tool's own.
+ */
+export function toolSpecs(tools: readonly AnyAssistantTool[], policy?: ToolPolicy): AiToolSpec[] {
+  return tools.map((t) =>
+    t.name === 'send_link' && policy && !allLinkKinds(policy)
+      ? narrowedSendLink(t, LINK_KINDS.filter((k) => policy.linkKinds.has(k)))
+      : { name: t.name, description: t.description, inputSchema: inputSchemaOf(t) },
+  )
 }
+
+/** send_link's description, one fixed sentence per kind (every kind: the tool's own description, byte for byte). */
+export const SEND_LINK_KIND_SENTENCES: Record<LinkKind, string> = {
+  calendar: 'calendar: book or change visits online (appointmentRef to change that visit)',
+  verify: 'verify: confirm it is them (needed before you can book, move or cancel by text)',
+  pin: 'pin: set their website PIN',
+  membership: 'membership: join a plan (tier: a plan key from SHOP FACTS memberships)',
+  pay: 'pay: pay an open invoice (appointmentRef of that visit, or null for the latest)',
+}
+const SEND_LINK_HEAD = 'Texts a secure personal link to the client’s own number and returns a placeholder like {link1} to put in your reply exactly as given. '
+const SEND_LINK_TAIL = '. At most 3 links a day. When the client cannot find a link texted earlier, call it again for that kind: the server texts the same link again when it can.'
+
+export function sendLinkDescription(kinds: readonly LinkKind[]): string {
+  const only = kinds.length < LINK_KINDS.length ? ' The shop has switched the other kinds off.' : ''
+  return `${SEND_LINK_HEAD}${kinds.map((k) => SEND_LINK_KIND_SENTENCES[k]).join('; ')}${SEND_LINK_TAIL}${only}`
+}
+
+function narrowedSendLink(t: AnyAssistantTool, kinds: LinkKind[]): AiToolSpec {
+  const schema = inputSchemaOf(t) as { properties?: { kind?: { enum?: string[] } } } & AiJsonObject
+  const copy = JSON.parse(JSON.stringify(schema)) as typeof schema
+  if (copy.properties?.kind) copy.properties.kind.enum = kinds
+  return { name: t.name, description: sendLinkDescription(kinds), inputSchema: copy }
+}
+
+/** The refusal of a tool or a link kind the owner switched off (design §3b: the runner refuses it as well as not offering it). */
+export const POLICY_OFF_MESSAGE = 'The shop has switched this off: say a team member can help.'
 
 /** The tools whose success counts as progress for the "6 turns without progress" breaker. */
 export const NON_PROGRESS_TOOLS: ReadonlySet<string> = new Set(['handoff_to_staff', 'opt_out', 'policy_judge'])
@@ -99,7 +158,7 @@ const errorResult = (u: ToolUse, outcome: { error: string; message: string; deta
 /** Runs one round of tool calls, in order, recording each. `seq` is the turn's running call counter (returned advanced). */
 export async function runToolRound(
   d: ToolRunnerDeps,
-  o: { registry: ToolRegistry; ctx: ToolContext; uses: readonly ToolUse[]; round: number; seq: number; actionsEnabled: boolean },
+  o: { registry: ToolRegistry; ctx: ToolContext; uses: readonly ToolUse[]; round: number; seq: number; actionsEnabled: boolean; policy?: ToolPolicy },
 ): Promise<ToolRoundResult & { seq: number }> {
   const out: ToolRoundResult = { results: [], balanceCents: null, confirmTexted: false, handoff: null, record: [], calls: [] }
   let seq = o.seq
@@ -114,6 +173,11 @@ export async function runToolRound(
       outcome = { ok: false, error: tool ? 'unavailable' : 'invalid', message: tool ? 'In-chat booking is off: send a calendar link instead.' : 'There is no such tool.' }
       rowOutcome = 'denied'
       rowError = tool ? 'actions_disabled' : 'unknown_tool'
+    } else if (o.policy && (!toolAllowed(tool, o.policy) || (u.name === 'send_link' && !linkKindAllowed(u.input, o.policy)))) {
+      // ADR 0174 §3b: a tool or a link kind the owner switched off is never offered, and refused when called anyway
+      outcome = { ok: false, error: 'not_allowed', message: POLICY_OFF_MESSAGE }
+      rowOutcome = 'denied'
+      rowError = 'policy_off'
     } else if (!trustAtLeast(o.ctx.identity.trust, tool.minTrust)) {
       outcome = { ok: false, error: 'needs_verification', message: 'This needs a quick verification first: offer a verify link with send_link.' }
       rowOutcome = 'denied'
@@ -164,6 +228,12 @@ export async function runToolRound(
     })
   }
   return { ...out, seq }
+}
+
+/** A send_link call's kind is one the owner's limits offer (an input without a known kind is the schema's to refuse). */
+function linkKindAllowed(input: unknown, p: ToolPolicy): boolean {
+  const kind = (input as { kind?: unknown } | null)?.kind
+  return typeof kind !== 'string' || !(LINK_KINDS as readonly string[]).includes(kind) || p.linkKinds.has(kind as LinkKind)
 }
 
 const PARTS = ['morning', 'afternoon', 'evening'] as const

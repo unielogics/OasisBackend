@@ -36,6 +36,15 @@ export class TurnLinks {
     return [...this.kinds]
   }
 
+  /**
+   * ADR 0174 §3b: the reply carries none of the turn's links (the handoff-topic backstop replaces the model's reply with the fixed
+   * handoff line): the issued links stay unused, the safety line goes with them.
+   */
+  drop(): void {
+    this.urls.clear()
+    this.kinds.clear()
+  }
+
   handoff(reason: ToolHandoffReason, summary: string): void {
     this.handoffRequest ??= { reason, summary }
   }
