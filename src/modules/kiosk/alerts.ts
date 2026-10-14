@@ -8,7 +8,8 @@
 //     tablet keeps working there is not a provider change), and
 //   - is at least 10 minutes old (a network's last_seen_at is written at most every 5 minutes, so a shop still in use has shown it by
 //     then), while kiosk mode is on.
-// At most one alert at a time (the newest such entry): a flood cannot create many, and unknown browsers never raise one.
+// At most one alert at a time (the entry first refused most recently, so the key stays put while tries go on): a flood cannot create
+// many, and unknown browsers never raise one.
 import { sql } from 'kysely'
 import type { Executor } from '../../platform/db.js'
 import { getSetting } from '../../platform/settings.js'
@@ -42,7 +43,8 @@ export const kioskAlertSource: ExternalAlertSource = {
           ),
         ),
       )
-      .orderBy('r.last_seen_at', 'desc')
+      // newest by FIRST refusal: last_seen_at moves on every try, so two such entries would take turns and the alert would come and go
+      .orderBy('r.first_seen_at', 'desc')
       .orderBy('r.id', 'desc')
       .limit(1)
       .executeTakeFirst()

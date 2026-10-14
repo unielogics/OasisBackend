@@ -198,6 +198,29 @@ describe('"The shop’s internet address may have changed" (Needs attention, Sup
     expect((await tryUnlock(h, device.cookie, pin, AWAY)).statusCode).toBe(200)
   })
 
+  it('keeps one key while two shop browsers go on being refused from two addresses (K-PIN recheck N1)', async () => {
+    const w = await h.kioskSetup()
+    const phone = await h.unlock(null, w.pin, w.shopIp) // a second shop browser: an employee's phone
+    await h.call('POST', 'kiosk/lock-all', { session: w.admin })
+    h.clock.advance(60 * MIN)
+    const HOME = '198.51.100.8'
+    expect((await tryUnlock(h, w.device.cookie, w.pin, AWAY)).json().code).toBe('KIOSK_NOT_AT_SHOP')
+    h.clock.advance(2 * MIN)
+    expect((await tryUnlock(h, phone.device.cookie, w.pin, HOME)).json().code).toBe('KIOSK_NOT_AT_SHOP')
+    h.clock.advance(KIOSK_ADDRESS_ALERT_AFTER_MS)
+    const keys = (await kioskAlerts(h, w.admin)).map((a) => a.key)
+    expect(keys).toEqual([`kiosk_address_changed:${(await refusedRow(h, HOME))!.id}`])
+    for (const [cookie, ip] of [
+      [w.device.cookie, AWAY],
+      [phone.device.cookie, HOME],
+      [w.device.cookie, AWAY],
+    ] as const) {
+      h.clock.advance(MIN)
+      expect((await tryUnlock(h, cookie, w.pin, ip)).json().code).toBe('KIOSK_NOT_AT_SHOP')
+      expect((await kioskAlerts(h, w.admin)).map((a) => a.key)).toEqual(keys)
+    }
+  })
+
   it('resolved when the entry is pruned (30 days) or the browser removed; a Super Admin viewing as Management does not see it', async () => {
     const { admin, device } = await providerChanged()
     h.clock.advance(KIOSK_ADDRESS_ALERT_AFTER_MS)

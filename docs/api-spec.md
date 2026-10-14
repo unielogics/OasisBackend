@@ -2820,8 +2820,9 @@ a known browser). `PUT /kiosk/code` and `POST /kiosk/devices` ("Make this a kios
 **Needs attention: "The shop's internet address may have changed"** (ADR 0180 A15; `kiosk_address_changed`, amber, Super Admins only,
 acting as one: `GET /ops/alerts` and `GET /ops/snapshot`). Title "The shop's internet address may have changed", text "Front desk tablet
 was refused from a new address. A Super Admin can add it in Settings → Kiosk.", `appointmentId` null, key `kiosk_address_changed:<refused
-id>`. Shown while kiosk mode is on for the newest refused entry that came from a live (not removed) shop browser, is at least 10 minutes
-old, and has `shopActiveSince` false; at most one at a time, never for unknown browsers. Computed on read like the other alerts: it is
+id>`. Shown while kiosk mode is on for the refused entry first refused most recently (so the key stays put while tries go on) that came
+from a live (not removed) shop browser, is at least 10 minutes old, and has `shopActiveSince` false; at most one at a time, never for
+unknown browsers. Computed on read like the other alerts: it is
 never repeated while that entry stands, and it goes by itself when the address is approved, the entry ages out (30 days) or is pruned,
 the browser is removed, or a shop network is in use again (e.g. an employee's phone refused at home overnight: the alert clears when
 the tablet is used at the shop in the morning).
