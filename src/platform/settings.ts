@@ -241,9 +241,11 @@ export const settingDefs = {
     schema: tintFilms,
     default: [] as z.infer<typeof tintFilms>,
   },
-  // Kiosk mode (ADR 0180): the shop tablet's keypad and kiosk sessions. Off until a manager sets the code, registers the tablet and turns
-  // it on (Settings -> Kiosk, PUT /kiosk/settings); turning it off revokes every kiosk session.
-  'kiosk.enabled': { schema: z.boolean(), default: false },
+  // Kiosk mode (ADR 0180, amendment 2026-10-14): the sign-in page is the keypad, and an employee's PIN typed on the shop's network
+  // unlocks the tablet. On by default (migration 20261017100000 turns the boot-time default row on, never a value somebody set); it
+  // does nothing until a Super Admin adds the shop's network and a manager sets PINs. Off (Settings -> Kiosk, PUT /kiosk/settings)
+  // revokes every kiosk session and brings back the email sign-in page.
+  'kiosk.enabled': { schema: z.boolean(), default: true },
   // Personal links carry the epoch they were issued in; bumping it kills every link and session at once (incident switch).
   'links.epoch': { schema: z.number().int().min(1).max(1_000_000), default: 1 },
 } as const

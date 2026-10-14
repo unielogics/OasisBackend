@@ -82,4 +82,4 @@
 | [0172](0172-square-item-library.md) | Square item library: services × vehicle sizes kept in step with Square's items (archived or hidden, never deleted; a tax mismatch pauses it) |
 | [0173](0173-sales-tax-precision-and-rounding.md) | Sales tax: the rate in thousandths of a percent (6.625%) and Square's rounding (half to even, once per invoice) |
 | [0174](0174-assistant-knowledge-practice-limits.md) | Oasis AI learns from the owner: knowledge and PDFs, a practice chat with corrections, limits and tone; the turn engine (waves K1c and K2c built) |
-| [0180](0180-kiosk-mode.md) | Kiosk mode: the shop tablet unlocked by a shop code, the employee tapped for each change, a fail-closed route list |
+| [0180](0180-kiosk-mode.md) | Kiosk mode: the shop tablet unlocked by an employee's PIN at the shop's network (amended 2026-10-14), the employee tapped for each change, a fail-closed route list |

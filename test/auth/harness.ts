@@ -41,7 +41,7 @@ export interface Session {
   res: LightMyRequestResponse
 }
 
-/** A registered kiosk device: its cookie (ADR 0180). */
+/** A shop browser (ADR 0180 amendment: it gets its device cookie at its first unlock at the shop): its cookie. */
 export interface KioskDevice {
   id: string
   name: string
@@ -60,7 +60,10 @@ export interface KioskSession {
   res: LightMyRequestResponse
 }
 
-export const KIOSK_CODE = '58203917'
+/** A PIN that passes every rule (tests that type a known PIN). */
+export const KIOSK_PIN = '58203917'
+/** The address kioskSetup's shop network is, unless it says otherwise. */
+export const SHOP_IP = '10.0.0.7'
 
 export interface Harness {
   readonly t: TestApp
@@ -94,15 +97,18 @@ export interface Harness {
     },
   ): Promise<LightMyRequestResponse>
   json<T = Record<string, unknown>>(res: LightMyRequestResponse): T
-  // --- kiosk mode (ADR 0180) ---
-  /** "Make this a kiosk" by a manager's session; returns the device cookie. */
-  registerDevice(admin: Pick<Session, 'cookie' | 'csrf'>, name?: string): Promise<KioskDevice>
-  /** Sets the shop code through PUT /kiosk/code (default KIOSK_CODE). */
-  setCode(admin: Pick<Session, 'cookie' | 'csrf'>, code?: string): Promise<void>
+  // --- kiosk mode (ADR 0180 and its 2026-10-14 amendment) ---
+  /** "This is the shop's network": a Super Admin's POST /kiosk/networks {confirmAddress} from `ip`; returns the network id. */
+  addShopNetwork(admin: Pick<Session, 'cookie' | 'csrf'>, ip?: string): Promise<string>
+  /** PUT /kiosk/staff/:employeeId/pin: `pin`, or a generated one; returns the PIN. */
+  setPin(admin: Pick<Session, 'cookie' | 'csrf'>, employeeId: string, pin?: string): Promise<string>
   /** Turns kiosk mode on or off through PUT /kiosk/settings. */
   setKioskMode(admin: Pick<Session, 'cookie' | 'csrf'>, enabled: boolean): Promise<void>
-  /** POST /kiosk/unlock from the device; throws unless it answers 200. */
-  unlock(device: KioskDevice, code?: string, ip?: string): Promise<KioskSession>
+  /**
+   * POST /kiosk/unlock from `ip` (default: the shop address kioskSetup last used) with `pin` (default: kioskSetup's last PIN), from
+   * the browser of `device` (null: a browser without a device cookie, which gets one); throws unless it answers 200.
+   */
+  unlock(device: KioskDevice | null, pin?: string, ip?: string): Promise<KioskSession>
   /** A request from an unlocked kiosk; `actor` becomes X-Oasis-Employee. */
   kioskCall(
     method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
@@ -110,8 +116,11 @@ export interface Harness {
     k: Pick<KioskSession, 'cookie' | 'csrf'>,
     o?: { actor?: string; body?: unknown; headers?: Record<string, string>; csrf?: boolean; ip?: string },
   ): Promise<LightMyRequestResponse>
-  /** A super admin signed in, the code set, this "tablet" registered, kiosk mode on and the kiosk unlocked. */
-  kioskSetup(): Promise<{ admin: Session; adminUser: TestUser; device: KioskDevice; kiosk: KioskSession }>
+  /**
+   * A Super Admin signed in at a shop address of its own, that address added as the shop's network, a PIN set for the Super Admin,
+   * and the "tablet" (a fresh browser) unlocked there with it: it got its device cookie.
+   */
+  kioskSetup(): Promise<{ admin: Session; adminUser: TestUser; device: KioskDevice; kiosk: KioskSession; pin: string; shopIp: string }>
 }
 
 let counter = 0
@@ -133,6 +142,8 @@ export function useHarness(
   const hours = new InMemoryBusinessHours()
   let origin = 'http://localhost:3000'
   let cookieName = 'oasis_sid'
+  let lastPin = KIOSK_PIN
+  let lastShopIp = SHOP_IP
 
   beforeAll(async () => {
     testDb = await createTestDb({ clock: new FixedClock(START), poolMax: 6 })
@@ -177,6 +188,8 @@ export function useHarness(
     identity.rbac.clear()
     identity.throttle.reset()
     identity.kioskGuard.reset()
+    lastPin = KIOSK_PIN
+    lastShopIp = SHOP_IP
   })
 
   afterAll(async () => {
@@ -279,17 +292,16 @@ export function useHarness(
 
     json: <T>(res: LightMyRequestResponse) => res.json() as T,
 
-    async registerDevice(admin, name = 'Front desk tablet') {
-      const res = await self.call('POST', 'kiosk/devices', { session: admin, body: { name } })
-      if (res.statusCode !== 201) throw new Error(`register failed: ${res.statusCode} ${res.body}`)
-      const c = res.cookies.find((x) => x.name === kioskDeviceCookieName(t.env))!
-      const body = res.json() as { device: { id: string; name: string } }
-      return { id: body.device.id, name: body.device.name, token: c.value, cookie: `${c.name}=${c.value}` }
+    async addShopNetwork(admin, ip = SHOP_IP) {
+      const res = await self.call('POST', 'kiosk/networks', { session: admin, body: { confirmAddress: ip }, ip })
+      if (res.statusCode !== 201 && res.statusCode !== 200) throw new Error(`add network failed: ${res.statusCode} ${res.body}`)
+      return (res.json() as { network: { id: string } }).network.id
     },
 
-    async setCode(admin, code = KIOSK_CODE) {
-      const res = await self.call('PUT', 'kiosk/code', { session: admin, body: { code } })
-      if (res.statusCode !== 200) throw new Error(`set code failed: ${res.statusCode} ${res.body}`)
+    async setPin(admin, employeeId, pin) {
+      const res = await self.call('PUT', `kiosk/staff/${employeeId}/pin`, { session: admin, body: pin ? { pin } : { generate: true } })
+      if (res.statusCode !== 200) throw new Error(`set PIN failed: ${res.statusCode} ${res.body}`)
+      return pin ?? (res.json() as { pin: string }).pin
     },
 
     async setKioskMode(admin, enabled) {
@@ -299,21 +311,24 @@ export function useHarness(
       if (res.statusCode !== 200) throw new Error(`kiosk mode failed: ${res.statusCode} ${res.body}`)
     },
 
-    async unlock(device, code = KIOSK_CODE, ip = '10.0.0.7') {
+    async unlock(device, pin = lastPin, ip = lastShopIp) {
       const res = await t.app.inject({
         method: 'POST',
         url: '/api/v1/kiosk/unlock',
-        headers: { origin, cookie: device.cookie },
+        headers: { origin, ...(device ? { cookie: device.cookie } : {}) },
         remoteAddress: ip,
-        payload: { code },
+        payload: { pin },
       })
       if (res.statusCode !== 200) throw new Error(`unlock failed: ${res.statusCode} ${res.body}`)
       const c = res.cookies.find((x) => x.name === kioskSessionCookieName(t.env))!
+      const d = res.cookies.find((x) => x.name === kioskDeviceCookieName(t.env))!
+      const me = res.json() as { csrfToken: string; device: { id: string; name: string } }
+      const dev: KioskDevice = device ?? { id: me.device.id, name: me.device.name, token: d.value, cookie: `${d.name}=${d.value}` }
       return {
-        device,
+        device: dev,
         token: c.value,
-        cookie: `${device.cookie}; ${c.name}=${c.value}`,
-        csrf: (res.json() as { csrfToken: string }).csrfToken,
+        cookie: `${dev.cookie}; ${c.name}=${c.value}`,
+        csrf: me.csrfToken,
         res,
       }
     },
@@ -333,12 +348,15 @@ export function useHarness(
     async kioskSetup() {
       counter++
       const adminUser = await self.createUser({ email: `kiosk-admin${counter}@example.test`, roles: ['super'], first: 'Rafael', last: 'Mendes' })
-      const admin = await self.login(adminUser, `10.3.${counter % 250}.1`)
-      await self.setCode(admin)
-      const device = await self.registerDevice(admin)
-      await self.setKioskMode(admin, true)
-      const kiosk = await self.unlock(device)
-      return { admin, adminUser, device, kiosk }
+      // each setup is its own shop address: the per-address limits (a frozen clock never lets their minute pass) never mix
+      const shopIp = `10.3.${Math.floor(counter / 250) % 250}.${(counter % 250) + 1}`
+      const admin = await self.login(adminUser, shopIp)
+      await self.addShopNetwork(admin, shopIp)
+      const pin = await self.setPin(admin, adminUser.employeeId)
+      lastPin = pin
+      lastShopIp = shopIp
+      const kiosk = await self.unlock(null, pin, shopIp)
+      return { admin, adminUser, device: kiosk.device, kiosk, pin, shopIp }
     },
   }
 

@@ -296,7 +296,7 @@ On a host without the secret (`--secrets-in-files`), edit the line in `common.en
 |---|---|---|---|
 | `SECRETS_KEY` (encrypts stored tablet and Squarespace credentials) | the secret | **not** with a plain push (the stored credentials must be re-encrypted): `sudo $D/secrets-rotate.sh --generate` (dry run), then `sudo $D/secrets-rotate.sh --new-key-file /etc/oasis/secrets-key.new --profile <operator profile> --apply` (`pnpm secrets:rotate` re-encrypts, then the new key is pushed into the secret). Store the new key in the password manager, then shred the key file | API and worker stop for under a minute |
 | `PIN_PEPPER` (HMAC key of the website PINs) | the secret only, never an env file | first time: section 10, "Personal links" (into the secret **before** `PUBLIC_LINKS_ENABLED=true`). Rotate only if it leaked: the recipe above with `gen-secrets.sh PIN_PEPPER > new.env` | every client's PIN stops working; each sets a new one through a texted code |
-| `SESSION_SECRET` | the secret | the recipe above (`gen-secrets.sh SESSION_SECRET > new.env`) | everyone is signed out |
+| `SESSION_SECRET` | the secret | the recipe above (`gen-secrets.sh SESSION_SECRET > new.env`) | everyone is signed out; every kiosk PIN stops working (managers set new ones, section 11) |
 | Database password | role `oasis`, `DATABASE_URL` in the secret | `sudo -u postgres psql -c "alter role oasis password 'NEW'"`, push the new `DATABASE_URL`, restart all three; update `drill.env` if you rotate `oasis_drill` | a short outage |
 | Tablet password | SMS Gate app, device record | change it in the app, then `oasis-admin.sh ... sms-update-device <id> --password-env VAR` (and `SMSGATE_PASSWORD` in the secret if you keep it for `verify.sh smsgate`) | none |
 | Tablet webhook signing key | SMS Gate app, device record | `sms-update-device <id> --webhook-secret-env VAR`, set the same key in the app, `sms-register-webhooks <id>` (and `SMSGATE_WEBHOOK_SECRET` in the secret if kept for `verify.sh smsgate`) | texts from customers pause until both sides match |
@@ -640,45 +640,67 @@ unaffected (Let's Encrypt resolves the name itself).
 
 ## 11. Kiosk mode (the shop tablet)
 
-The front-desk tablet can stay open all day without an email login (ADR 0180, `docs/api-spec.md` section 31). It is **off** until a
-manager turns it on; with it off the sign-in page and everything else are exactly as before. All of this is done in the dashboard,
-signed in as someone with "Assign roles & permissions" (Management or Super Admin).
+The front-desk tablet stays open all day without an email login (ADR 0180 and its 2026-10-14 amendment, `docs/api-spec.md` section
+31). Each employee has their **own 8-digit PIN**; any of them typed on the keypad **at the shop** opens the tablet for everyone until
+closing + 2 hours (2 hours on a closed day or late at night), recorded as "Opened by Marco R.". Staff still tap their name on each car
+step. **Kiosk mode is on by default**: the sign-in page is the keypad. Typing **0218** on the keypad shows the email and password form
+(managers need it for Settings, reports, prices and the team).
+
+"At the shop" means **the shop's internet connection**: a PIN works only from an address on the shop's list (Settings → Kiosk → Shop
+network). From anywhere else the keypad says "PINs work only at the shop" and the PIN is never checked.
 
 **Set it up once**
-1. Settings → Kiosk → Unlock code: type an 8-digit code twice, or tap Generate and write it down (it is shown once). A code can't start
-   with 0218, repeat a digit, run in a row (12345678), repeat a pattern, be a date, or be one of the last 3 codes.
-2. On the tablet itself: sign in with your email and password, Settings → Kiosk → "This device": give it a name ("Front desk tablet")
-   and tap **Make this a kiosk**. Only this browser on this tablet becomes the kiosk (a cookie it keeps for 400 days; clearing the
-   browser's data or using another browser undoes it: then do this step again and remove the old device). From here on, your own
-   sign-in on the tablet is a short one (15 minutes without use, 4 hours at most) with a "Signed in on a kiosk" bar.
-3. Turn **Kiosk mode** on (on the tablet or anywhere else). Every manager signed in on a kiosk tablet is signed out, so the tablet
-   goes to the keypad. Type the code: the board opens and stays open until closing + 2 hours (2 hours on a closed day or late at
-   night).
-4. Check: Settings → Kiosk lists the device as "Unlocked" with its lock time; "Recent kiosk events" shows the unlock.
-5. On the tablet, turn on the system's own guided access / screen pinning and a screen lock, so the browser can't be left.
+1. **The shop's network (Super Admin only).** Connect a phone, laptop or the tablet itself to the **shop's Wi-Fi** (not mobile data:
+   turn mobile data off on a phone), sign in as the Super Admin (on the tablet: type 0218 on the keypad), and open Settings → Kiosk →
+   Shop network. It shows "Your address: 203.0.113.7". Tap **This is the shop's network**. Every device on the shop's Wi-Fi shares
+   that address, so it does not have to be the tablet. If the screen says your address changed, you switched networks: check the
+   Wi-Fi and try again. Managers can see this list but only the Super Admin can add or remove addresses.
+2. **PINs (any manager).** Settings → Kiosk → People: for each person who opens the tablet, **Set PIN** (type 8 digits twice) or
+   **Generate** and give it to them (it is shown once; write nothing down where customers can see it). A PIN can't start with 0218,
+   repeat a digit, run in a row (12345678), repeat a pattern, be a date, be one of that person's last 3 PINs, or be someone else's PIN
+   (the screen then just says "Choose another PIN"). Only people with "Shows on the kiosk" ticked can open it.
+3. **Check.** On the tablet (on the shop's Wi-Fi) the keypad no longer says "set the shop network first". Type a PIN: the board opens.
+   Settings → Kiosk lists the tablet as a shop browser ("Shop browser 1 · Safari on iPad"): rename it ("Front desk tablet"). Recent
+   kiosk events show "Unlocked · Marco R.".
+4. On the tablet, turn on the system's own guided access / screen pinning and a screen lock, so the browser can't be left.
+5. If customers use the shop's Wi-Fi, give them a separate **guest network** if the router allows it: anyone on the shop's Wi-Fi
+   counts as "at the shop" (they would still need a PIN).
 
 **Every day.** Staff tap their name when they move a car, take a payment, text or book. "Lock kiosk" in the menu locks it; it also
-locks by itself at its lock time. A manager can still sign in on the tablet: type 0218 on the keypad to show the email and password
-form. That sign-in signs out after 15 minutes without use (4 hours at most); the next unlock with the code, Lock all, locking or
-removing the device and turning kiosk mode on or off sign it out too.
+locks by itself at its lock time; anyone with a PIN opens it again. A manager can still sign in on the tablet with 0218: that sign-in
+signs out after 15 minutes without use (4 hours at most); the next unlock, Lock all, locking or removing the browser and turning kiosk
+mode on or off sign it out too.
 
-**Change the code** (someone left, or every few months; Settings shows how old it is): Settings → Kiosk → Change code. Every kiosk
-locks at once; give the new code to the staff. If `SESSION_SECRET` was rotated (section 8), the old code stops working: set a new one.
+**Someone leaves.** Deactivate them (Team): their PIN stops working at once. To stop just the PIN: Settings → Kiosk → People → Remove
+PIN. Changing or removing a PIN does not lock the tablet. Unticking "Shows on the kiosk" also stops their PIN.
 
-**"Too many wrong codes"** (the tablet says a manager needs to sign in): after 3 wrong codes the keypad makes people wait (2 seconds,
-then 4, 8 ... up to 5 minutes); after 20 in a row the device is locked out. Settings → Kiosk → the device → **Clear lockout**, then
-the code works again. Many wrong codes in an hour on every kiosk slow every keypad down and add "Many wrong codes on every kiosk" to
-Recent kiosk events: check who is at the tablets, and change the code.
+**The internet provider changed the shop's address** (the keypad on the tablet suddenly says "PINs work only at the shop"): the tablet's
+refused PIN appears in Settings → Kiosk → "PIN tried from a new network" as "Front desk tablet tried from a new network", with the new
+address. The Super Admin taps **Add this network** (from anywhere, even away from the shop), and the tablet works again. An entry from
+an "unknown browser" (not a shop browser) needs care: add it only if you know it was someone at the shop. Remove the old address
+(Settings → Kiosk → Shop network → Remove) once it is no longer used. Note: **5G home internet and Starlink-style connections change
+their address often, and share it with other customers** of the same provider: expect to approve new addresses from time to time, and
+know that other people behind that shared address count as "at the shop" (they would still need a valid PIN).
 
-**Lost, stolen or replaced tablet**: Settings → Kiosk → the device → **Remove** (its cookie never works again, and anyone signed in on
-it is signed out), and change the code. "Lock all kiosks" locks every tablet now without removing anything (it also signs out anyone
-signed in on a tablet).
+**"Too many wrong PINs"** (the keypad says a manager needs to clear it): after 5 wrong PINs from the shop (3 on one tablet) the keypad
+makes people wait (2 seconds, then 4, 8 ... up to 5 minutes); after 30 in a row from the shop's address (20 on one tablet) it is locked
+out. A manager: Settings → Kiosk → the shop network (or the browser) → **Clear lockout**. Many wrong PINs in an hour slow every keypad
+and add "Many wrong PINs on every kiosk" to Recent kiosk events: check who is at the tablets, and change the PINs that may be known.
+
+**Lost, stolen or replaced tablet**: Settings → Kiosk → the browser → **Remove** (its cookie never works again, and anyone signed in on
+it is signed out). A new tablet becomes a shop browser at its first unlock at the shop. "Lock all kiosks" locks every tablet now
+without removing anything (it also signs out anyone signed in on a tablet).
 
 **Turn it off** (rollback): Settings → Kiosk → Kiosk mode off. Every kiosk session ends and the sign-in page shows the email form
-again. Nothing else changes; the devices and the code are kept for next time.
+again. Nothing else changes; the PINs, networks and browsers are kept for next time.
 
 **Who shows on the kiosk**: every active or invited employee of the shop, unless "Shows on the kiosk" is unticked for them (Settings →
 Kiosk). Deactivated employees never show.
+
+**Why the address and not the device** (for whoever reviews this later): the server sees the client's public address because nginx
+overwrites `X-Forwarded-For` and `X-Real-IP` with the address it saw, the API trusts exactly that one hop (`TRUST_PROXY=true`) and listens
+on 127.0.0.1 only, and DNS points straight at the server (no CDN or load balancer); verified on production 2026-10-14. If a CDN, a load
+balancer or another proxy is ever put in front, `TRUST_PROXY` must name it, or every PIN will look like it comes from that proxy.
 
 **Team activity history (once, at the rollout of the release that brings it)**: the report counts what each person did from the day
 that release runs. To give it the history from before, run once on the server, from the release:

@@ -32,8 +32,8 @@ describe('KIOSK_PERMISSIONS', () => {
       expect(KIOSK_PERMISSIONS.has(p), p).toBe(false)
   })
 
-  it('is not a role and kiosk mode is off by default', () => {
+  it('is not a role, and kiosk mode is on by default (ADR 0180 amendment: the keypad is the sign-in page)', () => {
     expect(DEFAULT_ROLES.map((r) => r.name)).not.toContain('Kiosk')
-    expect(defaultSetting('kiosk.enabled')).toBe(false)
+    expect(defaultSetting('kiosk.enabled')).toBe(true)
   })
 })

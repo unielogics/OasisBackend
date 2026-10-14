@@ -58,8 +58,9 @@ const PUBLIC_ROUTES = new Set([
   'DELETE /api/v1/public/links/cards/:cardId',
   'POST /api/v1/public/links/membership/subscribe',
   'GET /api/v1/public/links/membership/status',
-  // kiosk mode (ADR 0180): the sign-in page asks whether the keypad is on (no personal data); the registered device cookie plus the
-  // shop code unlock it (per-device throttle and lockout, per-address and global limits); the code is never checked without the cookie
+  // kiosk mode (ADR 0180 amendment): the sign-in page asks whether the keypad is on and whether PINs work from here (no personal
+  // data); an employee's PIN unlocks it only from a shop network address (never evaluated from anywhere else; per-address and
+  // per-browser throttle and lockout, a global limit)
   'GET /api/v1/kiosk/status',
   'POST /api/v1/kiosk/unlock',
 ])
@@ -70,6 +71,8 @@ const GUARD_403: Record<string, string[]> = {
   'GET /api/v1/kiosk/me': ['NOT_A_KIOSK'],
   'GET /api/v1/kiosk/staff': ['NOT_A_KIOSK'],
   'POST /api/v1/kiosk/lock': ['NOT_A_KIOSK'],
+  // the shop's networks are Super Admin only on top of team.roles (ADR 0180 amendment); the POST answers 422 first with the {} body
+  'DELETE /api/v1/kiosk/networks/:id': ['SUPER_ONLY'],
 }
 
 const fill = (url: string): string =>

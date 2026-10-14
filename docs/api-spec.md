@@ -431,8 +431,6 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PUT | `/api/v1/invoices/:id/tip` | pay.collect | required |
 | POST | `/api/v1/invoices/:id/void` | pay.void | required |
 | GET | `/api/v1/kiosk` | team.roles |  |
-| PUT | `/api/v1/kiosk/code` | team.roles |  |
-| POST | `/api/v1/kiosk/devices` | team.roles |  |
 | DELETE | `/api/v1/kiosk/devices/:id` | team.roles |  |
 | PATCH | `/api/v1/kiosk/devices/:id` | team.roles |  |
 | POST | `/api/v1/kiosk/devices/:id/clear-lockout` | team.roles |  |
@@ -440,9 +438,14 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/kiosk/lock` | authenticated |  |
 | POST | `/api/v1/kiosk/lock-all` | team.roles |  |
 | GET | `/api/v1/kiosk/me` | authenticated |  |
+| POST | `/api/v1/kiosk/networks` | team.roles |  |
+| DELETE | `/api/v1/kiosk/networks/:id` | team.roles |  |
+| POST | `/api/v1/kiosk/networks/:id/clear-lockout` | team.roles |  |
 | PUT | `/api/v1/kiosk/settings` | team.roles |  |
 | GET | `/api/v1/kiosk/staff` | authenticated |  |
 | PUT | `/api/v1/kiosk/staff/:employeeId` | team.roles |  |
+| DELETE | `/api/v1/kiosk/staff/:employeeId/pin` | team.roles |  |
+| PUT | `/api/v1/kiosk/staff/:employeeId/pin` | team.roles |  |
 | GET | `/api/v1/kiosk/status` | public |  |
 | POST | `/api/v1/kiosk/unlock` | public |  |
 | GET | `/api/v1/leads` | cli.view |  |
@@ -2679,19 +2682,20 @@ The Square payment link's tax line reads `Sales tax (6.625%)` (the invoice's own
 Square tax). Tests: `test/unit/tax-precision.test.ts` (golden vectors, including the 200 recorded sandbox answers),
 `test/payments/tax-precision.test.ts` (SQL equals TS; invoices keep their rate and rounding), `test/square-db/billing-settings.test.ts`.
 
-## 31. Kiosk mode (ADR 0180, waves K1a and K1b)
+## 31. Kiosk mode (ADR 0180, waves K1a and K1b; amended 2026-10-14, package K-PIN)
 
-The shop's shared tablet stays open all day without an email login. A manager signs in once on the tablet and taps "Make this a
-kiosk" (a registered device: an HttpOnly device cookie); the 8-digit shop code then unlocks it into a **kiosk session** that lasts
-until closing + 2 hours. Off until `kiosk.enabled` (setting, default false): with it off the keypad answers `409 KIOSK_OFF`, every
-kiosk session is invalid and nothing else changes. On the dashboard, typing `0218` as the first four digits reveals the email/password
-card (dashboard only; no code may start with 0218).
+The shop's shared tablet stays open all day without an email login. Any listed employee's own 8-digit **PIN**, typed on the shop's
+internet connection (an address a Super Admin added to the shop's networks), unlocks it into a **kiosk session** for everyone that
+lasts until closing + 2 hours, recorded as "Opened by Marco R.". A browser gets its device cookie at its first unlock there (a "shop
+browser"; no registration step). `kiosk.enabled` (setting) is **on by default**: the sign-in page is the keypad; with it off the keypad
+answers `409 KIOSK_OFF`, every kiosk session is invalid and the email sign-in page is back. On the dashboard, typing `0218` as the first
+four digits reveals the email/password card (dashboard only; no PIN may start with 0218).
 
 ### 31.1 Cookies and the request context
 
 | Cookie | Production name | Other | Attributes | Lifetime |
 |---|---|---|---|---|
-| Device | `__Host-oasis_kdev` | `oasis_kdev` | HttpOnly, Secure (`COOKIE_SECURE`), SameSite=Lax, Path=/ | 400 days, set again on every unlock |
+| Device | `__Host-oasis_kdev` | `oasis_kdev` | HttpOnly, Secure (`COOKIE_SECURE`), SameSite=Lax, Path=/ | 400 days, set at a browser's first unlock at the shop and again on every unlock |
 | Kiosk session | `__Host-oasis_ksid` | `oasis_ksid` | the same | until the lock time (browser-counted) |
 
 Only sha256 hashes of both tokens are stored (`kiosk_devices.token_hash`, `kiosk_sessions.id`). Resolution order: **a live user session
@@ -2732,16 +2736,29 @@ Reads ignore the header; with a user session present it is ignored too.
 
 | Method | Path | Access | Body | Answers |
 |---|---|---|---|---|
-| GET | `/kiosk/status` | public | – | `{enabled, device: {name} \| null, unlocked: {locksAt, locksAtLabel} \| null, lockedOut, retryAfterSec}`; no personal data |
-| POST | `/kiosk/unlock` | public (device cookie + code), 20/min | `{code: 8 digits}` | `200 KioskMe` + the kiosk cookie, the device cookie again; `403 KIOSK_DEVICE_UNKNOWN` (no live device cookie: the code is never checked); `409 KIOSK_OFF`, `409 KIOSK_CODE_NOT_SET`; `401 KIOSK_CODE_WRONG {meta.retryAfterSec}`; `429 KIOSK_THROTTLED` + Retry-After (not evaluated); `423 KIOSK_LOCKED_OUT` |
+| GET | `/kiosk/status` | public | – | `{enabled, networkSet, atShop, unlocked: {locksAt, locksAtLabel} \| null, lockedOut, retryAfterSec}`; no personal data. `networkSet`: a shop network exists (else the keypad says "A Super Admin must set the shop network first (Settings → Kiosk)"); `atShop`: the caller's address is one (else "PINs work only at the shop"); `lockedOut` / `retryAfterSec`: this browser's or this address's lockout and wait |
+| POST | `/kiosk/unlock` | public (an employee's PIN from a shop network address), 20/min | `{pin: 8 digits}` | `200 KioskMe` + the kiosk cookie and the device cookie (a new one at a browser's first unlock); `409 KIOSK_OFF`; `403 KIOSK_NOT_AT_SHOP {meta.networkSet}` (the address is in no shop network: the PIN is never checked, the try is listed for the Super Admin); `401 KIOSK_PIN_WRONG {meta.retryAfterSec}` (also for a PIN of a deactivated or hidden employee: it never tells whether someone has it); `429 KIOSK_THROTTLED` + Retry-After (not evaluated); `423 KIOSK_LOCKED_OUT` (this address or this browser) |
 | GET | `/kiosk/me` | an unlocked kiosk (else `403 NOT_A_KIOSK`) | – | `KioskMe` |
 | GET | `/kiosk/staff` | an unlocked kiosk | – | `{items: KioskPerson[]}` |
 | POST | `/kiosk/lock` | an unlocked kiosk, no actor | – | `204`, clears the kiosk cookie |
 
-`KioskMe = {kind: 'kiosk', device: {id, name}, lock: {unlockedAt, locksAt, locksAtLabel ("7:00 PM"), rule}, permissions: {<key>: {on}}
-(every catalog key), limits: {}, csrfToken, staff: KioskPerson[], businessTz, serverTime}`;
-`KioskPerson = {id, name ("Marco R."), first, initials, avatarColor, title, bayStaff}`: every active or invited employee of the location
-shown on the kiosk, bay staff (the staff view's rule) first, then by first name.
+`KioskMe = {kind: 'kiosk', device: {id, name}, lock: {unlockedAt, locksAt, locksAtLabel ("7:00 PM"), rule}, openedBy: {id, name}
+("Opened by Marco R."), permissions: {<key>: {on}} (every catalog key), limits: {}, csrfToken, staff: KioskPerson[], businessTz,
+serverTime}`; `KioskPerson = {id, name ("Marco R."), first, initials, avatarColor, title, bayStaff}`: every active or invited employee of
+the location shown on the kiosk, bay staff (the staff view's rule) first, then by first name. The name popup stays on every car step.
+
+**The shop's address.** The caller's address is `req.ip` through `TRUST_PROXY` (production: `true`, the one nginx hop, which
+overwrites `X-Forwarded-For` and `X-Real-IP` with `$remote_addr`; the API listens on 127.0.0.1 only; no CDN or load balancer); a
+forwarding header is never read directly, and an IPv4-mapped IPv6 address counts as IPv4. A shop network is an IPv4 address exactly
+(/32) or an IPv6 /64.
+
+**Unlock order.** Kiosk mode off → 409; the address in no shop network → 403 (nothing evaluated); the address's or the browser's
+lockout → 423; a wait → 429; then the PIN's lookup (hex HMAC-SHA256 of "<location>:<pin>" under a key derived from `SESSION_SECRET`)
+must name an active or invited employee of the shop with "Shows on the kiosk" on, else 401. Success: the browser's previous kiosk
+session ends (`unlock_again`), a user session that came with the request is signed out (its cookie cleared), a new session opens until
+the lock time with `opened_by_employee_id` / `opened_by_name`, the audit row `kiosk.unlock` is in the opener's name with the device
+(`after.openedBy`, `after.network`), and a `kiosk_unlock` staff event goes on their timeline. A browser without a live device cookie gets
+one: a `kiosk_devices` row "Shop browser N · <browser> on <device>" (audit `kiosk.device.register {auto: true}`).
 
 **Lock time** (`kioskLockTime`, computed once at unlock from today's and yesterday's hours, closures and the emergency): `previous_day`
 when yesterday's closing + 2 h is still ahead (a late close past midnight); `closing` when today is open and its closing + 2 h is
@@ -2749,37 +2766,47 @@ ahead, unless it is more than 3 hours before opening; otherwise `two_hours` (a c
 night); never more than 20 hours. The 2 hours are added to the instant (real hours across daylight saving). Later hours changes do not
 move it: "Lock all" does.
 
-**Unlock throttle** (ADR 0180 departs from ADR 0008's no-lockout rule): per device, persisted, 3 free wrong codes, then a wait of 2, 4,
-8 ... seconds up to 5 minutes before the next code is evaluated; 20 in a row lock the device out until a manager clears it. Per
-address, 10 free failures up to 120 s; across every device, more than 60 failures an hour slows everyone by 30 s and writes one
-`kiosk.unlock.alert` an hour. A success resets the device. A success also ends the device's previous kiosk session (`unlock_again`)
-and signs out a user session that came with the request (its cookie is cleared).
+**Unlock throttle** (ADR 0180 departs from ADR 0008's no-lockout rule): per shop address (persisted on its network row, shared by every
+browser at the shop), 5 free wrong PINs, then a wait of 2, 4, 8 ... seconds up to 5 minutes before the next PIN is evaluated, 30 in a
+row lock the address out until a manager clears it; per browser (its device cookie, when it has one), 3 free, the same waits, 20 lock
+that browser out. Across every browser, more than 60 wrong PINs an hour slows everyone by 30 s and writes one `kiosk.unlock.alert` an
+hour. A success resets the address and the browser. PINs tried from an unknown network are never evaluated; their address is listed
+(`kiosk_refused_networks`: written at most once a minute per address, 30 days, at most 50 rows, unknown browsers' rows pruned first;
+never an audit row).
 
-### 31.3 The manager's controls (`team.roles`, a signed-in person)
+### 31.3 The manager's controls (`team.roles`, a signed-in person; shop networks: Super Admin only)
 
 | Method | Path | Body | Answers |
 |---|---|---|---|
-| GET | `/kiosk` | – | `{enabled, version, code: {set, setAt, setBy, ageDays}, thisDeviceId, devices: KioskDevice[], staff: [{id, name, status, listed}], recent: [{at, action, label, by, deviceName}]}` |
-| PUT | `/kiosk/settings` | `{enabled, version}` | `{enabled, version, signedOut}` (`signedOut`: the caller was on a kiosk device and is signed out); `409 KIOSK_CODE_NOT_SET` to turn it on without a code; `412 VERSION_CONFLICT`; off revokes every kiosk session (`kiosk_off`); turning it on or off also signs out every manager on a kiosk device (the caller too when on one: its cookie is cleared) |
-| PUT | `/kiosk/code` | `{code}` or `{generate: true}` | `{setAt, code?}` (a generated code is shown once); `422 KIOSK_CODE_REJECTED` with the rule in `errors[0].message`: 8 digits, not starting with 0218, not one digit, no runs (with wrap), no repeating pattern of period 1 to 4 or doubled pairs, no date (YYYYMMDD / MMDDYYYY, 1900 to 2099), not a common code, not one of the last 3; every kiosk session ends (`code_changed`); two changes at once take turns (the shop's row is locked, the last-3 check under it: the same new code twice at once is one 200 and one 422), the last one wins |
-| POST | `/kiosk/devices` | `{name ≤ 40}` | `201 {device, signedOut}` + the device cookie; `409 KIOSK_DEVICE_EXISTS`; while kiosk mode is on the manager's own session ends and its cookie is cleared |
+| GET | `/kiosk` | – | `{enabled, version, yourAddress, yourAddressIsShop, canManageNetworks, networks: KioskNetwork[], refused: KioskRefused[], thisDeviceId, devices: KioskDevice[], staff: [{id, name, status, listed, pin: {setAt, setBy} \| null}], recent: [{at, action, label, by, deviceName}]}`; `yourAddress` is the caller's address as the server sees it; `canManageNetworks` says the caller is a Super Admin (acting as one); `staff[].pin` says who has a PIN, never the PIN |
+| PUT | `/kiosk/settings` | `{enabled, version}` | `{enabled, version, signedOut}` (`signedOut`: the caller was on a shop browser and is signed out); `412 VERSION_CONFLICT`; off revokes every kiosk session (`kiosk_off`); turning it on or off also signs out every manager on a shop browser (the caller too when on one: its cookie is cleared) |
+| PUT | `/kiosk/staff/:employeeId/pin` | `{pin}` or `{generate: true}` | `{employeeId, setAt, pin?}` (a generated PIN is shown once; `no-store`); `422 KIOSK_PIN_REJECTED` with the rule in `errors[0].message`: 8 digits, not starting with 0218, not one digit, no runs (with wrap), no repeating pattern of period 1 to 4 or doubled pairs, no date (YYYYMMDD / MMDDYYYY, 1900 to 2099), not a common PIN, not used by anyone else in the shop (the neutral "Choose another PIN."), not one of the employee's last 3; `409 KIOSK_PIN_INACTIVE` (deactivated); `404` (not of the shop); the tablet stays open; two people given the same PIN at once: one 200, one 422 |
+| DELETE | `/kiosk/staff/:employeeId/pin` | – | `204` (the PIN stops working and joins their history; nothing to do without one). Deactivating an employee removes their PIN too |
+| POST | `/kiosk/networks` | `{confirmAddress, label?}` or `{address, label?}` | **Super Admin only** (`403 SUPER_ONLY` otherwise, also while viewing as a lesser role). `{confirmAddress}`, "This is the shop's network", from any device on the shop Wi-Fi: adds the caller's own address (IPv4, or its IPv6 /64) only when it still equals the one the screen showed (`409 KIOSK_ADDRESS_CHANGED {meta.yourAddress}`); `{address}`: approves an entry of the refused list, from anywhere (`404 KIOSK_REFUSED_UNKNOWN` for any other address), and removes it from the list. `201 {network, created: true}`, or `200 {network, created: false}` when it already was one |
+| DELETE | `/kiosk/networks/:id` | – | **Super Admin only**. `204`: PINs stop working from that address (open kiosks stay open until they lock) |
+| POST | `/kiosk/networks/:id/clear-lockout` | – | `KioskNetwork` (the address's wrong-PIN counter starts over) |
 | PATCH | `/kiosk/devices/:id` | `{name, version}` | `KioskDevice`; `412 VERSION_CONFLICT` |
-| DELETE | `/kiosk/devices/:id` | – | `204`; the cookie stops working for good, its session ends (`device_revoked`), and a manager signed in on it is signed out |
+| DELETE | `/kiosk/devices/:id` | – | `204`; the cookie stops working for good, its session ends (`device_revoked`), and a manager signed in on it is signed out; a PIN typed later on that browser, at the shop, makes it a new shop browser |
 | POST | `/kiosk/devices/:id/lock` | – | `204` (`lock_device`); a manager signed in on it is signed out |
-| POST | `/kiosk/devices/:id/clear-lockout` | – | `KioskDevice` (the counter starts over) |
-| POST | `/kiosk/lock-all` | – | `{locked: n}` (`lock_all`); takes the shop's device rows first, so an unlock in progress finishes and its session is ended too; every manager signed in on a kiosk device is signed out (not counted in `locked`) |
-| PUT | `/kiosk/staff/:employeeId` | `{listed}` | `{id, name, status, listed}` ("Shows on the kiosk") |
+| POST | `/kiosk/devices/:id/clear-lockout` | – | `KioskDevice` (the browser's counter starts over) |
+| POST | `/kiosk/lock-all` | – | `{locked: n}` (`lock_all`); takes the shop's network rows, then its device rows, so an unlock in progress (a first one too) finishes and its session is ended too; every manager signed in on a shop browser is signed out (not counted in `locked`) |
+| PUT | `/kiosk/staff/:employeeId` | `{listed}` | `{id, name, status, listed}` ("Shows on the kiosk"; a hidden employee's PIN does not unlock either) |
 
-`KioskDevice = {id, name, state: unlocked|locked|locked_out|revoked, locksAt, lastSeenAt, lastIp, lastUa, failedAttempts, createdAt,
-createdBy, version}`. Every change is audited (`kiosk.device.register|rename|revoke|lock|lockout|lockout.clear`, `kiosk.code.set` (never
-the code), `kiosk.mode.on|off`, `kiosk.unlock`, `kiosk.unlock.failed`, `kiosk.unlock.alert`, `kiosk.lock`, `kiosk.lock_all`,
-`kiosk.staff.listed`) with the device in `audit_log.kiosk_device_id`, and publishes `settings.changed {section: 'kiosk'}`.
+`KioskNetwork = {id, address ("203.0.113.7" or "2001:db8:1:2::/64"), label, addedBy, addedAt, lastSeenAt, failedAttempts, lockedOut}`;
+`KioskRefused = {id, address, firstSeenAt, lastSeenAt, attempts, fromKnownBrowser, browserName}` (`fromKnownBrowser`: a try carried the
+cookie of a browser that unlocked at the shop before, `browserName` its name: the shop's address probably changed; else an unknown
+browser); `KioskDevice = {id, name, state: unlocked|locked|locked_out|revoked, locksAt, openedBy, lastSeenAt, lastIp, lastUa,
+failedAttempts, createdAt, createdBy, version}`. Every change is audited (`kiosk.pin.set|remove` (never the PIN),
+`kiosk.network.add|remove|lockout|lockout.clear`, `kiosk.device.register|rename|revoke|lock|lockout|lockout.clear`, `kiosk.mode.on|off`,
+`kiosk.unlock`, `kiosk.unlock.failed`, `kiosk.unlock.alert`, `kiosk.lock`, `kiosk.lock_all`, `kiosk.staff.listed`) with the device in
+`audit_log.kiosk_device_id` where there is one, and publishes `settings.changed {section: 'kiosk'}` (a refused try only when it came from
+a known browser). `PUT /kiosk/code` and `POST /kiosk/devices` ("Make this a kiosk") are gone.
 
-**A manager on a kiosk device.** `POST /auth/login` (and `POST /auth/invite/accept`) from a browser carrying a live device cookie opens a
-short session (15 minutes idle, 4 hours at most, `sessions.kiosk_device_id`); `GET /me` then answers `kioskDevice: {id, name}` (null
-elsewhere) and the dashboard shows a bar. A session opened any other way (before the tablet was registered, or elsewhere) that comes
-with a live device cookie is tied to that device on that request, for good, with the same short timings (K4 review kiosk:F1). Lock
-all, locking or removing the device and a kiosk mode change sign it out.
+**A manager on a shop browser.** `POST /auth/login` (and `POST /auth/invite/accept`) from a browser carrying a live device cookie (one
+that unlocked at the shop) opens a short session (15 minutes idle, 4 hours at most, `sessions.kiosk_device_id`); `GET /me` then answers
+`kioskDevice: {id, name}` (null elsewhere) and the dashboard shows a bar. A session opened any other way that comes with a live device
+cookie is tied to that browser on that request, for good, with the same short timings (K4 review kiosk:F1). Lock all, locking or
+removing the browser, a kiosk mode change and an unlock on that browser sign it out.
 
 ### 31.4 Team activity (`team.edit`; amounts need `pay.reports`)
 
@@ -2816,10 +2843,11 @@ person's own record) writes one `staff_events` row in its transaction, linked to
 credit, a saved card when its payment is recorded), a tip, a receipt, a payment link, a text and a check-in link. A kiosk putting a car
 in a bay also becomes its worker (`worker_set`, "Worker: Marco R." in the history); a signed-in person never changes the worker that
 way. Texts sent by staff, one checklist tick and a check-in link are now audited too (`message.staff_send`, `appointment.checklist.item`,
-`appointment.arrival_link`). `PATCH /appointments/:id` accepts an invited employee as the worker (of the shop only). History:
-`pnpm staff-events:backfill`, once.
+`appointment.arrival_link`). `PATCH /appointments/:id` accepts an invited employee as the worker (of the shop only). Since the
+amendment, an unlock records `kiosk_unlock` for the employee whose PIN opened the kiosk (on their timeline; not counted in the totals).
+History: `pnpm staff-events:backfill`, once (it rebuilds `kiosk_unlock` too, from the `kiosk.unlock` audit rows).
 
-Tests: `test/kiosk/*.test.ts` (code rules, lock time, throttle, permissions, principals, the HTTP flows, event streams, attribution in
-every command path generated from the route list, the report),
+Tests: `test/kiosk/*.test.ts` (PIN rules and lookup, shop networks and addresses, lock time, throttle, permissions, principals, the
+HTTP flows of the amendment, event streams, attribution in every command path generated from the route list, the report),
 `test/authz-matrix/kiosk-matrix.test.ts` (generated: every route against a kiosk, the contract marks, the boot check),
-`test/authz-matrix/matrix.test.ts` (the two public routes and the kiosk-only routes).
+`test/authz-matrix/matrix.test.ts` (the two public routes, the kiosk-only routes and the Super Admin-only network removal).

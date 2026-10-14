@@ -1,7 +1,7 @@
 // Kiosk sessions (ADR 0180): server-side rows addressed by the sha256 of an opaque 256-bit token in the HttpOnly kiosk cookie, like
 // user sessions (ADR 0008). A session is only valid together with the cookie of the live device it was made on, and only while kiosk
-// mode is on; it ends at its lock time (absolute, no idle expiry) or when it is revoked (lock, lock all, code change, device revoked,
-// kiosk mode off, a new unlock on the same device).
+// mode is on; it ends at its lock time (absolute, no idle expiry) or when it is revoked (lock, lock all, the device locked or removed,
+// kiosk mode off, a new unlock on the same device). It records whose PIN opened it (ADR 0180 amendment).
 import { isIP } from 'node:net'
 import { sql } from 'kysely'
 import type { Clock } from '../../platform/clock.js'
@@ -18,7 +18,7 @@ export interface KioskSessionRecord {
   deviceId: string
   deviceName: string
   locationId: string
-  codeId: string
+  openedBy: { employeeId: string | null; name: string }
   createdAt: Date
   expiresAt: Date
   lockRule: KioskLockRule
@@ -48,7 +48,8 @@ export async function lookupKioskSession(
       's.id',
       's.device_id',
       's.location_id',
-      's.code_id',
+      's.opened_by_employee_id',
+      's.opened_by_name',
       's.created_at',
       's.expires_at',
       's.lock_rule',
@@ -79,7 +80,7 @@ export async function lookupKioskSession(
     deviceId: row.device_id,
     deviceName: row.device_name,
     locationId: row.location_id,
-    codeId: row.code_id,
+    openedBy: { employeeId: row.opened_by_employee_id, name: row.opened_by_name },
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     lockRule: row.lock_rule,
@@ -90,7 +91,8 @@ export async function lookupKioskSession(
 export interface NewKioskSession {
   deviceId: string
   locationId: string
-  codeId: string
+  /** Whose PIN opened it, and their name ("Marco R.") at the time. */
+  openedBy: { employeeId: string; name: string }
   expiresAt: Date
   lockRule: KioskLockRule
   ip?: string | null
@@ -113,7 +115,8 @@ export async function createKioskSession(
       id,
       device_id: s.deviceId,
       location_id: s.locationId,
-      code_id: s.codeId,
+      opened_by_employee_id: s.openedBy.employeeId,
+      opened_by_name: s.openedBy.name,
       created_at: now,
       last_seen_at: now,
       expires_at: s.expiresAt,

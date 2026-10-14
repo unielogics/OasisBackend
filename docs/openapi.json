@@ -76040,52 +76040,9 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
-                    "code": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "ageDays": {
-                          "anyOf": [
-                            {
-                              "maximum": 9007199254740991,
-                              "minimum": -9007199254740991,
-                              "type": "integer"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "set": {
-                          "type": "boolean"
-                        },
-                        "setAt": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "setBy": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      },
-                      "required": [
-                        "set",
-                        "setAt",
-                        "setBy",
-                        "ageDays"
-                      ],
-                      "type": "object"
+                    "canManageNetworks": {
+                      "description": "The caller is a Super Admin: adds, removes and approves shop networks",
+                      "type": "boolean"
                     },
                     "devices": {
                       "items": {
@@ -76155,6 +76112,17 @@
                           "name": {
                             "type": "string"
                           },
+                          "openedBy": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "While unlocked: whose PIN opened it"
+                          },
                           "state": {
                             "enum": [
                               "unlocked",
@@ -76175,6 +76143,7 @@
                           "name",
                           "state",
                           "locksAt",
+                          "openedBy",
                           "lastSeenAt",
                           "lastIp",
                           "lastUa",
@@ -76189,6 +76158,74 @@
                     },
                     "enabled": {
                       "type": "boolean"
+                    },
+                    "networks": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "addedAt": {
+                            "type": "string"
+                          },
+                          "addedBy": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "address": {
+                            "description": "An IPv4 address (\"203.0.113.7\") or an IPv6 /64 prefix (\"2001:db8:1:2::/64\")",
+                            "type": "string"
+                          },
+                          "failedAttempts": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "lastSeenAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The last unlock from it"
+                          },
+                          "lockedOut": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "address",
+                          "label",
+                          "addedBy",
+                          "addedAt",
+                          "lastSeenAt",
+                          "failedAttempts",
+                          "lockedOut"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
                     },
                     "recent": {
                       "items": {
@@ -76235,6 +76272,57 @@
                       },
                       "type": "array"
                     },
+                    "refused": {
+                      "description": "PINs tried from an unknown network (30 days, at most 50), newest first",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "address": {
+                            "description": "What POST /kiosk/networks {address} approves",
+                            "type": "string"
+                          },
+                          "attempts": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "browserName": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "firstSeenAt": {
+                            "type": "string"
+                          },
+                          "fromKnownBrowser": {
+                            "description": "A try carried the cookie of a browser that unlocked at the shop before: the shop’s address probably changed",
+                            "type": "boolean"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "lastSeenAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "address",
+                          "firstSeenAt",
+                          "lastSeenAt",
+                          "attempts",
+                          "fromKnownBrowser",
+                          "browserName"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
                     "staff": {
                       "items": {
                         "additionalProperties": false,
@@ -76247,6 +76335,37 @@
                           },
                           "name": {
                             "type": "string"
+                          },
+                          "pin": {
+                            "anyOf": [
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "setAt": {
+                                    "type": "string"
+                                  },
+                                  "setBy": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "setAt",
+                                  "setBy"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Whether they have a PIN (never the PIN)"
                           },
                           "status": {
                             "enum": [
@@ -76261,7 +76380,8 @@
                           "id",
                           "name",
                           "status",
-                          "listed"
+                          "listed",
+                          "pin"
                         ],
                         "type": "object"
                       },
@@ -76281,12 +76401,30 @@
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
+                    },
+                    "yourAddress": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The caller’s internet address as the server sees it"
+                    },
+                    "yourAddressIsShop": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "enabled",
                     "version",
-                    "code",
+                    "yourAddress",
+                    "yourAddressIsShop",
+                    "canManageNetworks",
+                    "networks",
+                    "refused",
                     "thisDeviceId",
                     "devices",
                     "staff",
@@ -76299,214 +76437,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Settings → Kiosk: mode, code age, devices, who shows on the kiosk, recent kiosk events",
-        "tags": [
-          "kiosk"
-        ],
-        "x-oasis-access": "team.roles"
-      }
-    },
-    "/api/v1/kiosk/code": {
-      "put": {
-        "description": "8 digits, never starting with 0218, no repeats, runs, patterns, dates, common codes or one of the last 3 codes: 422 KIOSK_CODE_REJECTED with the rule in errors[0].message. The code is never stored or logged in clear.",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": false,
-                "properties": {
-                  "code": {
-                    "maxLength": 32,
-                    "type": "string"
-                  },
-                  "generate": {
-                    "enum": [
-                      true
-                    ],
-                    "type": "boolean"
-                  }
-                },
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "code": {
-                      "type": "string"
-                    },
-                    "setAt": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "setAt"
-                  ],
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Set the shop code ({code}) or generate one ({generate: true}, shown once); locks every kiosk now",
-        "tags": [
-          "kiosk"
-        ],
-        "x-oasis-access": "team.roles"
-      }
-    },
-    "/api/v1/kiosk/devices": {
-      "post": {
-        "description": "409 KIOSK_DEVICE_EXISTS when this browser already is a kiosk. While kiosk mode is on the manager’s own session ends (signedOut: true) and the browser goes to the keypad.",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "maxLength": 40,
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "name"
-                ],
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "device": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "createdAt": {
-                          "type": "string"
-                        },
-                        "createdBy": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "failedAttempts": {
-                          "maximum": 9007199254740991,
-                          "minimum": -9007199254740991,
-                          "type": "integer"
-                        },
-                        "id": {
-                          "type": "string"
-                        },
-                        "lastIp": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "lastSeenAt": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "lastUa": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "locksAt": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "name": {
-                          "type": "string"
-                        },
-                        "state": {
-                          "enum": [
-                            "unlocked",
-                            "locked",
-                            "locked_out",
-                            "revoked"
-                          ],
-                          "type": "string"
-                        },
-                        "version": {
-                          "maximum": 9007199254740991,
-                          "minimum": -9007199254740991,
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "name",
-                        "state",
-                        "locksAt",
-                        "lastSeenAt",
-                        "lastIp",
-                        "lastUa",
-                        "failedAttempts",
-                        "createdAt",
-                        "createdBy",
-                        "version"
-                      ],
-                      "type": "object"
-                    },
-                    "signedOut": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "device",
-                    "signedOut"
-                  ],
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "“Make this a kiosk”: register this browser; sets the device cookie (400 days)",
+        "summary": "Settings → Kiosk: mode, the caller’s address and whether it is a shop network, the shop networks, PINs tried from unknown networks, shop browsers, who shows on the kiosk and who has a PIN, recent kiosk events",
         "tags": [
           "kiosk"
         ],
@@ -76515,7 +76446,7 @@
     },
     "/api/v1/kiosk/devices/{id}": {
       "delete": {
-        "description": "A manager signed in on the device is signed out too (the caller’s own session cookie is cleared when it was one).",
+        "description": "A manager signed in on it is signed out too (the caller’s own session cookie is cleared when it was one). A PIN typed on that browser later, at the shop, makes it a new shop browser.",
         "parameters": [
           {
             "in": "path",
@@ -76531,7 +76462,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Remove a kiosk device: its cookie stops working for good and its kiosk session ends",
+        "summary": "Remove a shop browser: its cookie stops working for good and its kiosk session ends",
         "tags": [
           "kiosk"
         ],
@@ -76646,6 +76577,17 @@
                     "name": {
                       "type": "string"
                     },
+                    "openedBy": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "While unlocked: whose PIN opened it"
+                    },
                     "state": {
                       "enum": [
                         "unlocked",
@@ -76666,6 +76608,7 @@
                     "name",
                     "state",
                     "locksAt",
+                    "openedBy",
                     "lastSeenAt",
                     "lastIp",
                     "lastUa",
@@ -76681,7 +76624,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Rename a kiosk device",
+        "summary": "Rename a shop browser",
         "tags": [
           "kiosk"
         ],
@@ -76771,6 +76714,17 @@
                     "name": {
                       "type": "string"
                     },
+                    "openedBy": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "While unlocked: whose PIN opened it"
+                    },
                     "state": {
                       "enum": [
                         "unlocked",
@@ -76791,6 +76745,7 @@
                     "name",
                     "state",
                     "locksAt",
+                    "openedBy",
                     "lastSeenAt",
                     "lastIp",
                     "lastUa",
@@ -76806,7 +76761,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Clear a kiosk’s wrong-code lockout (the counter starts over)",
+        "summary": "Clear a browser’s wrong-PIN lockout (the counter starts over)",
         "tags": [
           "kiosk"
         ],
@@ -76815,7 +76770,7 @@
     },
     "/api/v1/kiosk/devices/{id}/lock": {
       "post": {
-        "description": "A manager signed in on the device is signed out too.",
+        "description": "A manager signed in on that browser is signed out too.",
         "parameters": [
           {
             "in": "path",
@@ -76856,7 +76811,7 @@
     },
     "/api/v1/kiosk/lock-all": {
       "post": {
-        "description": "`locked` counts kiosk sessions. Every manager signed in on a kiosk device is signed out too.",
+        "description": "`locked` counts kiosk sessions. Every manager signed in on a kiosk browser is signed out too.",
         "responses": {
           "200": {
             "content": {
@@ -76972,6 +76927,30 @@
                       ],
                       "type": "object"
                     },
+                    "openedBy": {
+                      "additionalProperties": false,
+                      "description": "Whose PIN opened this kiosk session (\"Opened by Marco R.\")",
+                      "properties": {
+                        "id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "type": "object"
+                    },
                     "permissions": {
                       "additionalProperties": {
                         "additionalProperties": false,
@@ -77044,6 +77023,7 @@
                     "kind",
                     "device",
                     "lock",
+                    "openedBy",
                     "permissions",
                     "limits",
                     "csrfToken",
@@ -77066,9 +77046,350 @@
         "x-oasis-kiosk": "none"
       }
     },
+    "/api/v1/kiosk/networks": {
+      "post": {
+        "description": "Super Admin only (403 SUPER_ONLY otherwise, in addition to team.roles; viewing as a lesser role does not count). {confirmAddress}: “This is the shop’s network”, from any device on the shop’s Wi-Fi: adds the caller’s own address (an IPv4 address, or its IPv6 /64), only when it still equals the address the screen showed (409 KIOSK_ADDRESS_CHANGED with meta.yourAddress otherwise, e.g. a phone that switched to mobile data). {address}: approves a \"PIN tried from a new network\" entry, from anywhere (404 KIOSK_REFUSED_UNKNOWN for any other address). 201 when added, 200 when it already was one.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "address": {
+                    "description": "Approve this address of the refused list (from anywhere)",
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  "confirmAddress": {
+                    "description": "“This is the shop’s network”: the address GET /kiosk showed as yourAddress; the caller’s address is added",
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  "label": {
+                    "anyOf": [
+                      {
+                        "maxLength": 60,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "created": {
+                      "enum": [
+                        false
+                      ],
+                      "type": "boolean"
+                    },
+                    "network": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "addedAt": {
+                          "type": "string"
+                        },
+                        "addedBy": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "address": {
+                          "description": "An IPv4 address (\"203.0.113.7\") or an IPv6 /64 prefix (\"2001:db8:1:2::/64\")",
+                          "type": "string"
+                        },
+                        "failedAttempts": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastSeenAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The last unlock from it"
+                        },
+                        "lockedOut": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "address",
+                        "label",
+                        "addedBy",
+                        "addedAt",
+                        "lastSeenAt",
+                        "failedAttempts",
+                        "lockedOut"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "network",
+                    "created"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "created": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    },
+                    "network": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "addedAt": {
+                          "type": "string"
+                        },
+                        "addedBy": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "address": {
+                          "description": "An IPv4 address (\"203.0.113.7\") or an IPv6 /64 prefix (\"2001:db8:1:2::/64\")",
+                          "type": "string"
+                        },
+                        "failedAttempts": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastSeenAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The last unlock from it"
+                        },
+                        "lockedOut": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "address",
+                        "label",
+                        "addedBy",
+                        "addedAt",
+                        "lastSeenAt",
+                        "failedAttempts",
+                        "lockedOut"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "network",
+                    "created"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Add a shop network: this connection’s address ({confirmAddress}) or an address of the refused list ({address})",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "team.roles"
+      }
+    },
+    "/api/v1/kiosk/networks/{id}": {
+      "delete": {
+        "description": "Super Admin only (403 SUPER_ONLY otherwise, in addition to team.roles).",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "summary": "Remove a shop network: PINs stop working from it (open kiosks stay open until they lock)",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "team.roles"
+      }
+    },
+    "/api/v1/kiosk/networks/{id}/clear-lockout": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "addedAt": {
+                      "type": "string"
+                    },
+                    "addedBy": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "address": {
+                      "description": "An IPv4 address (\"203.0.113.7\") or an IPv6 /64 prefix (\"2001:db8:1:2::/64\")",
+                      "type": "string"
+                    },
+                    "failedAttempts": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastSeenAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The last unlock from it"
+                    },
+                    "lockedOut": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "address",
+                    "label",
+                    "addedBy",
+                    "addedAt",
+                    "lastSeenAt",
+                    "failedAttempts",
+                    "lockedOut"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Clear a shop address’s wrong-PIN lockout (the counter starts over)",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "team.roles"
+      }
+    },
     "/api/v1/kiosk/settings": {
       "put": {
-        "description": "Turning it on needs a shop code (409 KIOSK_CODE_NOT_SET); turning it off ends every kiosk session. Turning it on or off also signs out every manager signed in on a kiosk device (the caller too, when on one: the session cookie is cleared). `version` is the version GET /kiosk returned (412 VERSION_CONFLICT when it changed).",
+        "description": "On by default. Turning it off ends every kiosk session. Turning it on or off also signs out every manager signed in on a kiosk browser (the caller too, when on one: the session cookie is cleared). `version` is the version GET /kiosk returned (412 VERSION_CONFLICT when it changed).",
         "requestBody": {
           "content": {
             "application/json": {
@@ -77277,7 +77598,100 @@
             "description": "Default Response"
           }
         },
-        "summary": "“Shows on the kiosk”: whether the employee picker lists this person",
+        "summary": "“Shows on the kiosk”: whether the employee picker lists this person (a hidden person’s PIN does not unlock either)",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "team.roles"
+      }
+    },
+    "/api/v1/kiosk/staff/{employeeId}/pin": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "employeeId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "summary": "Remove an employee’s kiosk PIN (nothing to do when they have none)",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "team.roles"
+      },
+      "put": {
+        "description": "8 digits, never starting with 0218, no repeats, runs, patterns, dates or common PINs, not used by anyone else in the shop (a neutral \"Choose another PIN\") and not one of that employee’s last 3: 422 KIOSK_PIN_REJECTED with the rule in errors[0].message. 409 KIOSK_PIN_INACTIVE for a deactivated employee; 404 for someone not of the shop. The PIN is never stored or logged in clear; the tablet stays open.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "employeeId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "generate": {
+                    "enum": [
+                      true
+                    ],
+                    "type": "boolean"
+                  },
+                  "pin": {
+                    "maxLength": 32,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "employeeId": {
+                      "type": "string"
+                    },
+                    "pin": {
+                      "type": "string"
+                    },
+                    "setAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "employeeId",
+                    "setAt"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Set an employee’s kiosk PIN ({pin}) or generate one ({generate: true}, shown once)",
         "tags": [
           "kiosk"
         ],
@@ -77293,29 +77707,18 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
-                    "device": {
-                      "anyOf": [
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "name": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "name"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
+                    "atShop": {
+                      "description": "The caller’s address is a shop network (else: \"PINs work only at the shop\")",
+                      "type": "boolean"
                     },
                     "enabled": {
                       "type": "boolean"
                     },
                     "lockedOut": {
+                      "type": "boolean"
+                    },
+                    "networkSet": {
+                      "description": "At least one shop network exists (else: \"A Super Admin must set the shop network first\")",
                       "type": "boolean"
                     },
                     "retryAfterSec": {
@@ -77349,7 +77752,8 @@
                   },
                   "required": [
                     "enabled",
-                    "device",
+                    "networkSet",
+                    "atShop",
                     "unlocked",
                     "lockedOut",
                     "retryAfterSec"
@@ -77362,7 +77766,7 @@
           }
         },
         "security": [],
-        "summary": "Kiosk mode on or off, and this browser’s kiosk state (device name, lock time, lockout, wait)",
+        "summary": "Kiosk mode on or off, whether a shop network is set and the caller is on it, and this browser’s state (lock time, lockout, wait)",
         "tags": [
           "kiosk"
         ],
@@ -77371,20 +77775,20 @@
     },
     "/api/v1/kiosk/unlock": {
       "post": {
-        "description": "403 KIOSK_DEVICE_UNKNOWN (no live device cookie: the code is never checked); 409 KIOSK_OFF or KIOSK_CODE_NOT_SET; 401 KIOSK_CODE_WRONG with meta.retryAfterSec; 429 KIOSK_THROTTLED with Retry-After (the code is not checked); 423 KIOSK_LOCKED_OUT (20 wrong codes in a row: a manager clears it). Success ends the device’s previous kiosk session, signs out a user session on the device and sets the device cookie again (400 days).",
+        "description": "409 KIOSK_OFF; 403 KIOSK_NOT_AT_SHOP with meta.networkSet when the caller’s address is in no shop network (the PIN is never checked; the try is listed for the Super Admin); 401 KIOSK_PIN_WRONG with meta.retryAfterSec (never says whether someone else has the PIN); 429 KIOSK_THROTTLED with Retry-After (the PIN is not checked); 423 KIOSK_LOCKED_OUT (too many wrong PINs from this address or this browser: a manager clears it). Success opens the kiosk for everyone, recorded as opened by the PIN’s employee; ends this browser’s previous kiosk session; signs out a user session on it; and sets the device cookie (400 days), a new one at a browser’s first unlock (\"Shop browser N\").",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "additionalProperties": false,
                 "properties": {
-                  "code": {
+                  "pin": {
                     "pattern": "^\\d{8}$",
                     "type": "string"
                   }
                 },
                 "required": [
-                  "code"
+                  "pin"
                 ],
                 "type": "object"
               }
@@ -77474,6 +77878,30 @@
                       ],
                       "type": "object"
                     },
+                    "openedBy": {
+                      "additionalProperties": false,
+                      "description": "Whose PIN opened this kiosk session (\"Opened by Marco R.\")",
+                      "properties": {
+                        "id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "type": "object"
+                    },
                     "permissions": {
                       "additionalProperties": {
                         "additionalProperties": false,
@@ -77546,6 +77974,7 @@
                     "kind",
                     "device",
                     "lock",
+                    "openedBy",
                     "permissions",
                     "limits",
                     "csrfToken",
@@ -77561,7 +77990,7 @@
           }
         },
         "security": [],
-        "summary": "Unlock this registered kiosk with the shop code; sets the kiosk session cookie until the lock time",
+        "summary": "Unlock the kiosk with an employee’s PIN at the shop; sets the kiosk session cookie until the lock time",
         "tags": [
           "kiosk"
         ],
@@ -115223,7 +115652,8 @@
                                     "payment_link",
                                     "text",
                                     "arrival_link",
-                                    "worker_set"
+                                    "worker_set",
+                                    "kiosk_unlock"
                                   ],
                                   "type": "string"
                                 },
@@ -115797,7 +116227,8 @@
                               "payment_link",
                               "text",
                               "arrival_link",
-                              "worker_set"
+                              "worker_set",
+                              "kiosk_unlock"
                             ],
                             "type": "string"
                           },

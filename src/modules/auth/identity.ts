@@ -10,7 +10,7 @@ import { RbacService } from '../rbac/service.js'
 import { PeopleService } from '../people/employees.js'
 import { RolesService } from '../people/roles.js'
 import { unconfiguredBusinessHours, type BusinessHoursPort } from '../people/business-hours.js'
-import { KioskCodeHasher, kioskKey } from '../kiosk/code.js'
+import { kioskKey } from '../kiosk/pin.js'
 import { KioskService } from '../kiosk/service.js'
 import { KioskUnlockGuard } from '../kiosk/throttle.js'
 import { createSessionAuthorizer } from './authorizer.js'
@@ -25,7 +25,7 @@ export type IdentityEnv = Pick<
   Env,
   'NODE_ENV' | 'COOKIE_SECURE' | 'SESSION_COOKIE_NAME' | 'PUBLIC_DASHBOARD_URL'
 > & {
-  /** The kiosk code key derives from it (ADR 0180); a fixed development value stands in outside production. */
+  /** The kiosk PIN key derives from it (ADR 0180); a fixed development value stands in outside production. */
   SESSION_SECRET?: string
 }
 
@@ -59,7 +59,7 @@ export interface Identity {
   readonly auth: AuthService
   readonly people: PeopleService
   readonly roles: RolesService
-  /** Kiosk mode (ADR 0180): devices, the unlock code, kiosk sessions, the acting employee. */
+  /** Kiosk mode (ADR 0180): employees' PINs, the shop's networks, shop browsers, kiosk sessions, the acting employee. */
   readonly kiosk: KioskService
   readonly kioskGuard: KioskUnlockGuard
   readonly authorizer: Authorizer
@@ -80,7 +80,7 @@ export function createIdentity(o: IdentityOptions): IdentityAuthorizer {
     clock: o.clock,
     newId,
     env: o.env,
-    hasher: new KioskCodeHasher(kioskKey(o.env), o.passwordParams ?? DEFAULT_SCRYPT_PARAMS),
+    pinKey: kioskKey(o.env),
     guard: kioskGuard,
     userSessions: sessions,
     defaultLocationId: o.locationId,

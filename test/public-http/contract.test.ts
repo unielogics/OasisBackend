@@ -40,7 +40,7 @@ describe('the public website API contract', () => {
         '/api/v1/auth/login',
         '/api/v1/auth/password/forgot',
         '/api/v1/auth/password/reset',
-        // kiosk mode (ADR 0180): the keypad's status and the unlock (the registered device cookie plus the code)
+        // kiosk mode (ADR 0180 amendment): the keypad's status and the unlock (an employee's PIN, only from a shop network address)
         '/api/v1/kiosk/status',
         '/api/v1/kiosk/unlock',
         '/api/v1/meta/now',

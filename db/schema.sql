@@ -103,6 +103,20 @@ end
 $$;
 
 --
+-- Name: employee_kiosk_pin_drop(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.employee_kiosk_pin_drop() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  with gone as (delete from employee_kiosk_pins where employee_id = new.id returning employee_id, pin_lookup, set_at)
+  insert into employee_kiosk_pin_history (employee_id, pin_lookup, set_at) select employee_id, pin_lookup, set_at from gone;
+  return null;
+end
+$$;
+
+--
 -- Name: ensure_location(uuid, text, text, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1371,6 +1385,46 @@ CREATE TABLE public.emergency_notifications (
 );
 
 --
+-- Name: employee_kiosk_pin_history; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.employee_kiosk_pin_history (
+    id bigint NOT NULL,
+    employee_id uuid NOT NULL,
+    pin_lookup text NOT NULL,
+    set_at timestamp with time zone NOT NULL,
+    retired_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT employee_kiosk_pin_history_pin_lookup_check CHECK ((pin_lookup ~ '^[0-9a-f]{64}$'::text))
+);
+
+--
+-- Name: employee_kiosk_pin_history_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE public.employee_kiosk_pin_history ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.employee_kiosk_pin_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+--
+-- Name: employee_kiosk_pins; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.employee_kiosk_pins (
+    employee_id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    pin_lookup text NOT NULL,
+    set_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    set_by uuid,
+    set_by_name text,
+    CONSTRAINT employee_kiosk_pins_pin_lookup_check CHECK ((pin_lookup ~ '^[0-9a-f]{64}$'::text))
+);
+
+--
 -- Name: employee_locations; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1658,21 +1712,6 @@ CREATE TABLE public.job_runs (
 );
 
 --
--- Name: kiosk_codes; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.kiosk_codes (
-    id uuid NOT NULL,
-    location_id uuid NOT NULL,
-    code_hash text NOT NULL,
-    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
-    created_by uuid,
-    created_by_name text,
-    retired_at timestamp with time zone,
-    CONSTRAINT kiosk_codes_code_hash_check CHECK ((code_hash ~~ '$scrypt$%'::text))
-);
-
---
 -- Name: kiosk_devices; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1699,6 +1738,44 @@ CREATE TABLE public.kiosk_devices (
 );
 
 --
+-- Name: kiosk_networks; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.kiosk_networks (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    cidr cidr NOT NULL,
+    label text,
+    added_by uuid,
+    added_by_name text,
+    added_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    last_seen_at timestamp with time zone,
+    failed_attempts integer DEFAULT 0 NOT NULL,
+    last_failed_at timestamp with time zone,
+    locked_out_at timestamp with time zone,
+    CONSTRAINT kiosk_networks_cidr_check CHECK ((((family((cidr)::inet) = 4) AND (masklen((cidr)::inet) = 32)) OR ((family((cidr)::inet) = 6) AND (masklen((cidr)::inet) = 64)))),
+    CONSTRAINT kiosk_networks_failed_attempts_check CHECK ((failed_attempts >= 0)),
+    CONSTRAINT kiosk_networks_label_check CHECK (((label IS NULL) OR ((btrim(label) <> ''::text) AND (length(label) <= 60))))
+);
+
+--
+-- Name: kiosk_refused_networks; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.kiosk_refused_networks (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    cidr cidr NOT NULL,
+    first_seen_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    attempts integer DEFAULT 1 NOT NULL,
+    known_device_id uuid,
+    known_device_name text,
+    CONSTRAINT kiosk_refused_networks_attempts_check CHECK ((attempts >= 1)),
+    CONSTRAINT kiosk_refused_networks_cidr_check CHECK ((((family((cidr)::inet) = 4) AND (masklen((cidr)::inet) = 32)) OR ((family((cidr)::inet) = 6) AND (masklen((cidr)::inet) = 64))))
+);
+
+--
 -- Name: kiosk_sessions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1706,7 +1783,6 @@ CREATE TABLE public.kiosk_sessions (
     id text NOT NULL,
     device_id uuid NOT NULL,
     location_id uuid NOT NULL,
-    code_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     expires_at timestamp with time zone NOT NULL,
     lock_rule text NOT NULL,
@@ -1716,11 +1792,14 @@ CREATE TABLE public.kiosk_sessions (
     last_seen_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     revoked_at timestamp with time zone,
     revoked_reason text,
+    opened_by_employee_id uuid,
+    opened_by_name text NOT NULL,
     CONSTRAINT kiosk_sessions_check CHECK ((expires_at > created_at)),
     CONSTRAINT kiosk_sessions_check1 CHECK (((revoked_at IS NULL) = (revoked_reason IS NULL))),
     CONSTRAINT kiosk_sessions_id_check CHECK ((id ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT kiosk_sessions_lock_rule_check CHECK ((lock_rule = ANY (ARRAY['closing'::text, 'previous_day'::text, 'two_hours'::text]))),
-    CONSTRAINT kiosk_sessions_revoked_reason_check CHECK ((revoked_reason = ANY (ARRAY['lock'::text, 'lock_device'::text, 'lock_all'::text, 'code_changed'::text, 'device_revoked'::text, 'kiosk_off'::text, 'unlock_again'::text])))
+    CONSTRAINT kiosk_sessions_opened_by_name_check CHECK ((btrim(opened_by_name) <> ''::text)),
+    CONSTRAINT kiosk_sessions_revoked_reason_check CHECK ((revoked_reason = ANY (ARRAY['lock'::text, 'lock_device'::text, 'lock_all'::text, 'device_revoked'::text, 'kiosk_off'::text, 'unlock_again'::text])))
 );
 
 --
@@ -3534,7 +3613,7 @@ CREATE TABLE public.staff_events (
     meta jsonb DEFAULT '{}'::jsonb NOT NULL,
     audit_id bigint,
     CONSTRAINT staff_events_employee_name_check CHECK ((btrim(employee_name) <> ''::text)),
-    CONSTRAINT staff_events_kind_check CHECK ((kind = ANY (ARRAY['confirm'::text, 'arrive'::text, 'assign_bay'::text, 'start'::text, 'complete'::text, 'notify_ready'::text, 'pickup'::text, 'pickup_reopen'::text, 'prep_bay'::text, 'reschedule'::text, 'update'::text, 'book'::text, 'walk_in'::text, 'customer_create'::text, 'addon_add'::text, 'addon_remove'::text, 'size_change'::text, 'checklist'::text, 'photo'::text, 'payment'::text, 'tip'::text, 'receipt'::text, 'payment_link'::text, 'text'::text, 'arrival_link'::text, 'worker_set'::text]))),
+    CONSTRAINT staff_events_kind_check CHECK ((kind = ANY (ARRAY['confirm'::text, 'arrive'::text, 'assign_bay'::text, 'start'::text, 'complete'::text, 'notify_ready'::text, 'pickup'::text, 'pickup_reopen'::text, 'prep_bay'::text, 'reschedule'::text, 'update'::text, 'book'::text, 'walk_in'::text, 'customer_create'::text, 'addon_add'::text, 'addon_remove'::text, 'size_change'::text, 'checklist'::text, 'photo'::text, 'payment'::text, 'tip'::text, 'receipt'::text, 'payment_link'::text, 'text'::text, 'arrival_link'::text, 'worker_set'::text, 'kiosk_unlock'::text]))),
     CONSTRAINT staff_events_via_check CHECK ((via = ANY (ARRAY['kiosk'::text, 'signed_in'::text])))
 );
 
@@ -4120,6 +4199,27 @@ ALTER TABLE ONLY public.emergency_notifications
     ADD CONSTRAINT emergency_notifications_pkey PRIMARY KEY (id);
 
 --
+-- Name: employee_kiosk_pin_history employee_kiosk_pin_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_kiosk_pin_history
+    ADD CONSTRAINT employee_kiosk_pin_history_pkey PRIMARY KEY (id);
+
+--
+-- Name: employee_kiosk_pins employee_kiosk_pins_lookup_uq; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_kiosk_pins
+    ADD CONSTRAINT employee_kiosk_pins_lookup_uq UNIQUE (location_id, pin_lookup);
+
+--
+-- Name: employee_kiosk_pins employee_kiosk_pins_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_kiosk_pins
+    ADD CONSTRAINT employee_kiosk_pins_pkey PRIMARY KEY (employee_id);
+
+--
 -- Name: employee_locations employee_locations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4246,13 +4346,6 @@ ALTER TABLE ONLY public.job_runs
     ADD CONSTRAINT job_runs_pkey PRIMARY KEY (name);
 
 --
--- Name: kiosk_codes kiosk_codes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.kiosk_codes
-    ADD CONSTRAINT kiosk_codes_pkey PRIMARY KEY (id);
-
---
 -- Name: kiosk_devices kiosk_devices_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4265,6 +4358,34 @@ ALTER TABLE ONLY public.kiosk_devices
 
 ALTER TABLE ONLY public.kiosk_devices
     ADD CONSTRAINT kiosk_devices_token_hash_key UNIQUE (token_hash);
+
+--
+-- Name: kiosk_networks kiosk_networks_cidr_uq; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_networks
+    ADD CONSTRAINT kiosk_networks_cidr_uq UNIQUE (location_id, cidr);
+
+--
+-- Name: kiosk_networks kiosk_networks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_networks
+    ADD CONSTRAINT kiosk_networks_pkey PRIMARY KEY (id);
+
+--
+-- Name: kiosk_refused_networks kiosk_refused_networks_cidr_uq; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_refused_networks
+    ADD CONSTRAINT kiosk_refused_networks_cidr_uq UNIQUE (location_id, cidr);
+
+--
+-- Name: kiosk_refused_networks kiosk_refused_networks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_refused_networks
+    ADD CONSTRAINT kiosk_refused_networks_pkey PRIMARY KEY (id);
 
 --
 -- Name: kiosk_sessions kiosk_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -5524,6 +5645,12 @@ CREATE INDEX emergency_closures_history_idx ON public.emergency_closures USING b
 CREATE INDEX emergency_notifications_state_idx ON public.emergency_notifications USING btree (emergency_closure_id, state);
 
 --
+-- Name: employee_kiosk_pin_history_emp_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX employee_kiosk_pin_history_emp_idx ON public.employee_kiosk_pin_history USING btree (employee_id, id DESC);
+
+--
 -- Name: employee_locations_location_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5614,22 +5741,16 @@ CREATE INDEX job_checklist_items_appointment_idx ON public.job_checklist_items U
 CREATE INDEX job_checklist_items_task_idx ON public.job_checklist_items USING btree (source_task_id) WHERE (source_task_id IS NOT NULL);
 
 --
--- Name: kiosk_codes_current_uq; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX kiosk_codes_current_uq ON public.kiosk_codes USING btree (location_id) WHERE (retired_at IS NULL);
-
---
--- Name: kiosk_codes_history_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX kiosk_codes_history_idx ON public.kiosk_codes USING btree (location_id, created_at DESC);
-
---
 -- Name: kiosk_devices_live_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX kiosk_devices_live_idx ON public.kiosk_devices USING btree (location_id) WHERE (revoked_at IS NULL);
+
+--
+-- Name: kiosk_refused_networks_seen_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX kiosk_refused_networks_seen_idx ON public.kiosk_refused_networks USING btree (location_id, last_seen_at DESC);
 
 --
 -- Name: kiosk_sessions_live_idx; Type: INDEX; Schema: public; Owner: -
@@ -6544,6 +6665,12 @@ CREATE TRIGGER credit_allocations_guard BEFORE DELETE OR UPDATE ON public.credit
 CREATE TRIGGER customers_email_unverify BEFORE UPDATE OF email ON public.customers FOR EACH ROW EXECUTE FUNCTION public.customers_email_unverify();
 
 --
+-- Name: employees employees_kiosk_pin_drop; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER employees_kiosk_pin_drop AFTER UPDATE OF status ON public.employees FOR EACH ROW WHEN (((new.status = 'inactive'::text) AND (old.status IS DISTINCT FROM 'inactive'::text))) EXECUTE FUNCTION public.employee_kiosk_pin_drop();
+
+--
 -- Name: ledger_events ledger_events_guard; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -7204,6 +7331,34 @@ ALTER TABLE ONLY public.emergency_notifications
     ADD CONSTRAINT emergency_notifications_reschedule_link_id_fkey FOREIGN KEY (reschedule_link_id) REFERENCES public.reschedule_links(id);
 
 --
+-- Name: employee_kiosk_pin_history employee_kiosk_pin_history_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_kiosk_pin_history
+    ADD CONSTRAINT employee_kiosk_pin_history_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
+
+--
+-- Name: employee_kiosk_pins employee_kiosk_pins_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_kiosk_pins
+    ADD CONSTRAINT employee_kiosk_pins_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
+
+--
+-- Name: employee_kiosk_pins employee_kiosk_pins_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_kiosk_pins
+    ADD CONSTRAINT employee_kiosk_pins_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: employee_kiosk_pins employee_kiosk_pins_set_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_kiosk_pins
+    ADD CONSTRAINT employee_kiosk_pins_set_by_fkey FOREIGN KEY (set_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
 -- Name: employee_locations employee_locations_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7365,20 +7520,6 @@ ALTER TABLE ONLY public.job_checklist_items
     ADD CONSTRAINT job_checklist_items_source_task_id_fkey FOREIGN KEY (source_task_id) REFERENCES public.checklist_tasks(id) ON DELETE SET NULL;
 
 --
--- Name: kiosk_codes kiosk_codes_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.kiosk_codes
-    ADD CONSTRAINT kiosk_codes_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE SET NULL;
-
---
--- Name: kiosk_codes kiosk_codes_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.kiosk_codes
-    ADD CONSTRAINT kiosk_codes_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
-
---
 -- Name: kiosk_devices kiosk_devices_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7400,11 +7541,32 @@ ALTER TABLE ONLY public.kiosk_devices
     ADD CONSTRAINT kiosk_devices_revoked_by_fkey FOREIGN KEY (revoked_by) REFERENCES public.users(id) ON DELETE SET NULL;
 
 --
--- Name: kiosk_sessions kiosk_sessions_code_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: kiosk_networks kiosk_networks_added_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.kiosk_sessions
-    ADD CONSTRAINT kiosk_sessions_code_id_fkey FOREIGN KEY (code_id) REFERENCES public.kiosk_codes(id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.kiosk_networks
+    ADD CONSTRAINT kiosk_networks_added_by_fkey FOREIGN KEY (added_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: kiosk_networks kiosk_networks_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_networks
+    ADD CONSTRAINT kiosk_networks_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: kiosk_refused_networks kiosk_refused_networks_known_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_refused_networks
+    ADD CONSTRAINT kiosk_refused_networks_known_device_id_fkey FOREIGN KEY (known_device_id) REFERENCES public.kiosk_devices(id) ON DELETE SET NULL;
+
+--
+-- Name: kiosk_refused_networks kiosk_refused_networks_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_refused_networks
+    ADD CONSTRAINT kiosk_refused_networks_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: kiosk_sessions kiosk_sessions_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -7419,6 +7581,13 @@ ALTER TABLE ONLY public.kiosk_sessions
 
 ALTER TABLE ONLY public.kiosk_sessions
     ADD CONSTRAINT kiosk_sessions_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: kiosk_sessions kiosk_sessions_opened_by_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_sessions
+    ADD CONSTRAINT kiosk_sessions_opened_by_employee_id_fkey FOREIGN KEY (opened_by_employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
 
 --
 -- Name: leads leads_booked_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

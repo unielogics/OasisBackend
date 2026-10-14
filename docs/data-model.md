@@ -65,6 +65,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261016200000_assistant_set_permission.sql` | the permission `set.assistant` ("Oasis AI assistant", sort 28, appended last): granted to every role that holds `set.hours`, and a person's own `set.hours` exception copied to it (ADR 0174) |
 | `20261016200100_assistant_knowledge.sql` | the assistant's knowledge (ADR 0174): `assistant_knowledge` (the owner's notes, the reviewed text of PDFs and corrections; only active entries reach the prompt, sharing one character budget with the Settings Q&A) and `assistant_knowledge_documents` (uploaded PDFs under the `kb/` key prefix, their status, extracted text and sha256) |
 | `20261016200200_assistant_practice.sql` | the assistant's practice chat (ADR 0174 §4c): `assistant_practice_sessions` (the owner's practice chats, their creator's own, kept 30 days) and `assistant_practice_turns` (each practice text and what Oasis AI would answer); the only tables practice writes |
+| `20261017100000_kiosk_pins.sql` | Kiosk unlock by per-employee PINs at the shop's network (ADR 0180 amendment, 2026-10-14): the shop code dropped (`kiosk_codes` and `kiosk_sessions.code_id`; every code-era kiosk session deleted, production had none), `kiosk_sessions.opened_by_employee_id` / `opened_by_name` (whose PIN opened it); `employee_kiosk_pins` (one PIN lookup per employee, unique in the shop) and `employee_kiosk_pin_history` (their previous lookups, the last-3 rule), a trigger removing a deactivated employee's PIN; `kiosk_networks` (the shop's addresses, IPv4 /32 or IPv6 /64, with the per-address unlock throttle); `kiosk_refused_networks` (PINs tried from other addresses, for the Super Admin to approve); `staff_events.kind` gains `kiosk_unlock`; `kiosk.enabled` turned on where it was still the boot-time default |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -413,22 +414,27 @@ read-only preview and tax check in `square_items_state`.
 Square deliveries and catch-up events share `webhook_log` (provider `square`, `external_id` = Square's `event_id`): whichever claims the
 event first processes it; the raw body and the headers without the signature are kept for the 90-day trail.
 
-## Kiosk mode (migrations `20261016100000_kiosk.sql`, `20261016100100_staff_attribution.sql`, `20261016100200_staff_events.sql`, `20261016100300_staff_attribution_links.sql` and `20261016100400_completed_worker.sql`, ADR 0180)
+## Kiosk mode (migrations `20261016100000_kiosk.sql`, `20261016100100_staff_attribution.sql`, `20261016100200_staff_events.sql`, `20261016100300_staff_attribution_links.sql`, `20261016100400_completed_worker.sql` and `20261017100000_kiosk_pins.sql`, ADR 0180 and its 2026-10-14 amendment)
 
-The shop's shared tablet stays open all day without an email login: an admin registers it once ("Make this a kiosk"), and the 8-digit
-shop code unlocks it into a kiosk session until closing + 2 hours. Everything is off until `kiosk.enabled` (setting, default false).
-A kiosk request has no user (`AuthContext.userId` null): the employee tapped on the kiosk is the actor, so the attribution columns
-sit next to the user columns. Only token hashes are stored; the code itself never is.
+The shop's shared tablet stays open all day without an email login: any listed employee's own 8-digit PIN, typed on the shop's
+internet connection (an address in `kiosk_networks`, added only by a Super Admin), unlocks it into a kiosk session for everyone until
+closing + 2 hours, recorded as opened by that employee. A browser gets its device cookie at its first unlock there ("Shop browser N").
+Kiosk mode is on by default (`kiosk.enabled`); nothing unlocks until a shop network and PINs exist. A kiosk request has no user
+(`AuthContext.userId` null): the employee tapped on the kiosk is the actor, so the attribution columns sit next to the user columns.
+Only token hashes and PIN lookups are stored; a PIN itself never is.
 
 | Table | Purpose |
 | ----- | ------- |
-| `kiosk_devices` | A registered kiosk tablet of a location: `name` (≤ 40), `token_hash` (sha256 of the opaque `__Host-oasis_kdev` cookie token, unique), who registered it, `last_seen_at` / `last_ip` / `last_ua`, the persisted unlock throttle (`failed_attempts` consecutive wrong codes, `last_failed_at`; 20 sets `locked_out_at` until a manager clears it), `revoked_at` / `revoked_by` (the cookie stops working for good), `version` |
-| `kiosk_codes` | The location's unlock codes: `code_hash` (PHC scrypt over HMAC-SHA256(kiosk key, "<location id>:<code>"), the key derived from `SESSION_SECRET`), who set it and when; every code ever set (a new code may not be one of the last 3), the current one has `retired_at` null (unique index `kiosk_codes_current_uq`) |
-| `kiosk_sessions` | An unlocked kiosk: `id` = sha256 of the `__Host-oasis_ksid` cookie token, the device, location and code, `expires_at` (the lock time from `kioskLockTime`, absolute, no idle expiry), `lock_rule closing\|previous_day\|two_hours`, `csrf_secret`, address and browser, `last_seen_at`, `revoked_at` + `revoked_reason lock\|lock_device\|lock_all\|code_changed\|device_revoked\|kiosk_off\|unlock_again` (set together). Valid only with the cookie of its own live device and while kiosk mode is on |
-| `staff_events` | One row per thing an employee did, the source of the Team activity report: `employee_id` and `employee_name` (snapshot "Marco R."), `kind` (a car step `confirm`, `arrive`, `assign_bay`, `start`, `complete`, `notify_ready`, `pickup`, `pickup_reopen`, `prep_bay`, `reschedule`, `update`; `book`, `walk_in`, `customer_create`, `addon_add`, `addon_remove`, `size_change`, `checklist`, `photo`, `payment`, `tip`, `receipt`, `payment_link`, `text`, `arrival_link`, `worker_set`), the appointment, client, `amount_cents`, `ledger_event_id`, `message_id`, `via kiosk\|signed_in` with the `kiosk_device_id` or the `user_id`, `request_id`, `meta`, `audit_id` (the audit row it was recorded with; unique). Written in the command's own transaction whenever the request has an acting employee (kiosk or signed in; `src/platform/staff-events.ts`, the exhaustive action map in `scheduling/audit-helper.ts`, `payments/staff-events.ts`); history rebuilt once by `pnpm staff-events:backfill` |
+| `kiosk_devices` | A shop browser of a location, created at its first successful unlock at the shop: `name` (≤ 40, "Shop browser 2 · Safari on iPad" until a manager renames it), `token_hash` (sha256 of the opaque `__Host-oasis_kdev` cookie token, unique), `created_by_name` (whose PIN opened it first; `created_by` is null for these), `last_seen_at` / `last_ip` / `last_ua`, the persisted per-browser unlock throttle (`failed_attempts` consecutive wrong PINs, `last_failed_at`; 20 sets `locked_out_at` until a manager clears it), `revoked_at` / `revoked_by` (Remove: the cookie stops working for good), `version` |
+| `kiosk_sessions` | An unlocked kiosk: `id` = sha256 of the `__Host-oasis_ksid` cookie token, the device and location, `opened_by_employee_id` and `opened_by_name` (whose PIN opened it, "Marco R."), `expires_at` (the lock time from `kioskLockTime`, absolute, no idle expiry), `lock_rule closing\|previous_day\|two_hours`, `csrf_secret`, address and browser, `last_seen_at`, `revoked_at` + `revoked_reason lock\|lock_device\|lock_all\|device_revoked\|kiosk_off\|unlock_again` (set together). Valid only with the cookie of its own live device and while kiosk mode is on |
+| `employee_kiosk_pins` | An employee's kiosk PIN (one each, set only by a manager): `pin_lookup` = hex HMAC-SHA256(kiosk PIN key, "<location id>:<pin>"), the key derived from `SESSION_SECRET` (deterministic: a typed PIN finds its employee by index; unique per location, `employee_kiosk_pins_lookup_uq`), `set_at`, `set_by` / `set_by_name`. A trigger on `employees` deletes the row (into the history) when the employee is deactivated |
+| `employee_kiosk_pin_history` | An employee's previous PIN lookups, newest first (`id`), `set_at` and `retired_at`; a new PIN may not be one of their last 3 (the current one and two before it); the newest 5 are kept |
+| `kiosk_networks` | The shop's internet addresses, where PINs work: `cidr` (an IPv4 address as a /32, an IPv6 address as its /64; unique per location), `label`, `added_by` / `added_by_name` (a Super Admin), `added_at`, `last_seen_at` (the last unlock from it), the persisted per-address unlock throttle shared by every browser at the shop (`failed_attempts`, `last_failed_at`; 30 sets `locked_out_at` until a manager clears it) |
+| `kiosk_refused_networks` | PINs tried from an address that is no shop network ("PIN tried from a new network"), for the Super Admin to approve: `cidr` (/32 or /64, unique per location), `first_seen_at`, `last_seen_at`, `attempts` (written at most once a minute per address, the tries in between added with the next write), `known_device_id` / `known_device_name` (a try carried the cookie of a browser that unlocked at the shop before: the provider probably changed the shop's address). Kept 30 days and at most 50 rows a location, rows of unknown browsers pruned first; never in the audit log |
+| `staff_events` | One row per thing an employee did, the source of the Team activity report: `employee_id` and `employee_name` (snapshot "Marco R."), `kind` (a car step `confirm`, `arrive`, `assign_bay`, `start`, `complete`, `notify_ready`, `pickup`, `pickup_reopen`, `prep_bay`, `reschedule`, `update`; `book`, `walk_in`, `customer_create`, `addon_add`, `addon_remove`, `size_change`, `checklist`, `photo`, `payment`, `tip`, `receipt`, `payment_link`, `text`, `arrival_link`, `worker_set`; `kiosk_unlock`: their PIN opened the kiosk), the appointment, client, `amount_cents`, `ledger_event_id`, `message_id`, `via kiosk\|signed_in` with the `kiosk_device_id` or the `user_id`, `request_id`, `meta`, `audit_id` (the audit row it was recorded with; unique). Written in the command's own transaction whenever the request has an acting employee (kiosk or signed in; `src/platform/staff-events.ts`, the exhaustive action map in `scheduling/audit-helper.ts`, `payments/staff-events.ts`); history rebuilt once by `pnpm staff-events:backfill` |
 
 Columns added to existing tables: `employees.kiosk_listed` (default true: who the picker lists among active and invited
-employees), `sessions.kiosk_device_id` (a manager signed in on a kiosk device: 15 minutes idle, 4 hours absolute), `audit_log.kiosk_device_id`
+employees; a hidden employee's PIN does not unlock either), `sessions.kiosk_device_id` (a manager signed in on a shop browser: 15 minutes idle, 4 hours absolute), `audit_log.kiosk_device_id`
 (no foreign key, like the other audit actor columns), and the employee beside each user column: `activity_log.actor_employee_id` and
 `kiosk_device_id`, `appointments.created_by_employee_id`, `appointment_addons.added_by_employee_id`,
 `appointment_photos.uploaded_by_employee_id`, `payment_links.created_by_employee_id`. Payments and texts already carried the employee
@@ -509,7 +515,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (133 tables, 1 view, 16 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (136 tables, 1 view, 17 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -1249,6 +1255,31 @@ Primary key `(id)`. `(location_id)` references `locations(id)` on delete cascade
 
 Primary key `(id)`. Unique `(emergency_closure_id, appointment_id)`. `(appointment_id)` references `appointments(id)` on delete cascade. `(customer_id)` references `customers(id)`. `(emergency_closure_id)` references `emergency_closures(id)` on delete cascade. `(reschedule_link_id)` references `reschedule_links(id)`. 2 check constraints. Index `emergency_notifications_state_idx` `(emergency_closure_id, state)`.
 
+#### `employee_kiosk_pin_history`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | bigint | no |  |
+| `employee_id` | uuid | no |  |
+| `pin_lookup` | text | no |  |
+| `set_at` | timestamp with time zone | no |  |
+| `retired_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. `(employee_id)` references `employees(id)` on delete cascade. 1 check constraint. Index `employee_kiosk_pin_history_emp_idx` `(employee_id, id DESC)`.
+
+#### `employee_kiosk_pins`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `employee_id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `pin_lookup` | text | no |  |
+| `set_at` | timestamp with time zone | no | `app_now()` |
+| `set_by` | uuid | yes |  |
+| `set_by_name` | text | yes |  |
+
+Primary key `(employee_id)`. Unique `(location_id, pin_lookup)`. `(employee_id)` references `employees(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. `(set_by)` references `users(id)` on delete set null. 1 check constraint.
+
 #### `employee_locations`
 
 | Column | Type | Null | Default |
@@ -1312,7 +1343,7 @@ Primary key `(employee_id, weekday)`. `(employee_id)` references `employees(id)`
 | `deactivated_at` | timestamp with time zone | yes |  |
 | `kiosk_listed` | boolean | no | `true` |
 
-Primary key `(id)`. Unique `(email)`. 6 check constraints. Index `employees_phone_e164_idx` `(phone_e164)` where `phone_e164 IS NOT NULL`. Index `employees_status_idx` `(status)`.
+Primary key `(id)`. Unique `(email)`. 6 check constraints. Index `employees_phone_e164_idx` `(phone_e164)` where `phone_e164 IS NOT NULL`. Index `employees_status_idx` `(status)`. Trigger: `employees_kiosk_pin_drop`.
 
 #### `federal_holiday_runs`
 
@@ -1471,20 +1502,6 @@ Primary key `(id)`. `(appointment_addon_id)` references `appointment_addons(id)`
 
 Primary key `(name)`. 1 check constraint.
 
-#### `kiosk_codes`
-
-| Column | Type | Null | Default |
-| --- | --- | --- | --- |
-| `id` | uuid | no |  |
-| `location_id` | uuid | no |  |
-| `code_hash` | text | no |  |
-| `created_at` | timestamp with time zone | no | `app_now()` |
-| `created_by` | uuid | yes |  |
-| `created_by_name` | text | yes |  |
-| `retired_at` | timestamp with time zone | yes |  |
-
-Primary key `(id)`. `(created_by)` references `users(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. 1 check constraint. Unique index `kiosk_codes_current_uq` `(location_id)` where `retired_at IS NULL`. Index `kiosk_codes_history_idx` `(location_id, created_at DESC)`.
-
 #### `kiosk_devices`
 
 | Column | Type | Null | Default |
@@ -1508,6 +1525,39 @@ Primary key `(id)`. `(created_by)` references `users(id)` on delete set null. `(
 
 Primary key `(id)`. Unique `(token_hash)`. `(created_by)` references `users(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. `(revoked_by)` references `users(id)` on delete set null. 3 check constraints. Index `kiosk_devices_live_idx` `(location_id)` where `revoked_at IS NULL`.
 
+#### `kiosk_networks`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `cidr` | cidr | no |  |
+| `label` | text | yes |  |
+| `added_by` | uuid | yes |  |
+| `added_by_name` | text | yes |  |
+| `added_at` | timestamp with time zone | no | `app_now()` |
+| `last_seen_at` | timestamp with time zone | yes |  |
+| `failed_attempts` | integer | no | `0` |
+| `last_failed_at` | timestamp with time zone | yes |  |
+| `locked_out_at` | timestamp with time zone | yes |  |
+
+Primary key `(id)`. Unique `(location_id, cidr)`. `(added_by)` references `users(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. 3 check constraints.
+
+#### `kiosk_refused_networks`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `cidr` | cidr | no |  |
+| `first_seen_at` | timestamp with time zone | no | `app_now()` |
+| `last_seen_at` | timestamp with time zone | no | `app_now()` |
+| `attempts` | integer | no | `1` |
+| `known_device_id` | uuid | yes |  |
+| `known_device_name` | text | yes |  |
+
+Primary key `(id)`. Unique `(location_id, cidr)`. `(known_device_id)` references `kiosk_devices(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. 2 check constraints. Index `kiosk_refused_networks_seen_idx` `(location_id, last_seen_at DESC)`.
+
 #### `kiosk_sessions`
 
 | Column | Type | Null | Default |
@@ -1515,7 +1565,6 @@ Primary key `(id)`. Unique `(token_hash)`. `(created_by)` references `users(id)`
 | `id` | text | no |  |
 | `device_id` | uuid | no |  |
 | `location_id` | uuid | no |  |
-| `code_id` | uuid | no |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `expires_at` | timestamp with time zone | no |  |
 | `lock_rule` | text | no |  |
@@ -1525,8 +1574,10 @@ Primary key `(id)`. Unique `(token_hash)`. `(created_by)` references `users(id)`
 | `last_seen_at` | timestamp with time zone | no | `app_now()` |
 | `revoked_at` | timestamp with time zone | yes |  |
 | `revoked_reason` | text | yes |  |
+| `opened_by_employee_id` | uuid | yes |  |
+| `opened_by_name` | text | no |  |
 
-Primary key `(id)`. `(code_id)` references `kiosk_codes(id)` on delete cascade. `(device_id)` references `kiosk_devices(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. 5 check constraints. Index `kiosk_sessions_live_idx` `(device_id)` where `revoked_at IS NULL`. Index `kiosk_sessions_location_live_idx` `(location_id)` where `revoked_at IS NULL`.
+Primary key `(id)`. `(device_id)` references `kiosk_devices(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. `(opened_by_employee_id)` references `employees(id)` on delete set null. 6 check constraints. Index `kiosk_sessions_live_idx` `(device_id)` where `revoked_at IS NULL`. Index `kiosk_sessions_location_live_idx` `(location_id)` where `revoked_at IS NULL`.
 
 #### `leads`
 
@@ -3235,6 +3286,7 @@ Primary key `(id)`. Unique `(provider, external_id)`. 3 check constraints. Index
 - function `catalog_default_category(p_kind text, p_tags text[]) returns text`
 - function `credit_allocations_guard() returns trigger`
 - function `customers_email_unverify() returns trigger`
+- function `employee_kiosk_pin_drop() returns trigger`
 - function `ensure_location(p_id uuid, p_slug text, p_name text, p_timezone text DEFAULT 'America/New_York'::text) returns uuid`
 - function `invoice_calc_of(p_invoice uuid) returns TABLE(invoice_id uuid, items bigint, adj bigint, sub bigint, tax bigint, tip bigint, total bigint, paid_orig bigint, credit_applied bigint, paid bigint, refunded bigint, ref_orig bigint, pending_amt bigint, pending_n bigint, issued bigint, balance bigint, refundable bigint, to_orig_max bigint, net bigint, overpaid bigint, status text)`
 - function `ledger_events_guard() returns trigger`

@@ -2,7 +2,8 @@
 // has history from day one. Run once after the release that brings staff events (`pnpm staff-events:backfill`); running it again
 // adds nothing (an audit row has at most one event: staff_events.audit_id is unique, and a text at most one `text` event).
 //   - audit_log rows of a person with an employee record: the appointment actions (the same map as the live commands,
-//     scheduling/audit-helper.ts), the payments commands (payments/staff-events.ts), a client created, a saved-card charge, a text;
+//     scheduling/audit-helper.ts), the payments commands (payments/staff-events.ts), a client created, a saved-card charge, a text,
+//     a kiosk opened with someone's PIN (ADR 0180 amendment; unlocks with the old shop code had no employee);
 //   - staff texts in `messages` sent before texts were audited.
 // System, automation and AI actions have no employee and are nobody's activity. The event's name is the employee's name today.
 import { sql } from 'kysely'
@@ -50,7 +51,7 @@ const str = (v: unknown): string | null => (typeof v === 'string' ? v : null)
 const int = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) ? v : null)
 
 /** The audit actions the backfill reads (besides `appointment.*`). */
-const OTHER_ACTIONS = [...PAYMENT_STAFF_ACTIONS, 'customer.create', 'card.charged', 'message.staff_send']
+const OTHER_ACTIONS = [...PAYMENT_STAFF_ACTIONS, 'customer.create', 'card.charged', 'message.staff_send', 'kiosk.unlock']
 
 /** The staff event of one audit row, as the live command would have recorded it; null when it is nobody's activity. */
 async function eventOf(db: Db, r: AuditRow): Promise<Omit<StaffEventInput, 'ctx' | 'locationId'> | null> {
@@ -90,6 +91,7 @@ async function eventOf(db: Db, r: AuditRow): Promise<Omit<StaffEventInput, 'ctx'
   }
   if (r.action === 'message.staff_send')
     return { kind: 'text', appointmentId: str(after.appointmentId), customerId: str(after.customerId), messageId: r.entity_id }
+  if (r.action === 'kiosk.unlock') return { kind: 'kiosk_unlock', meta: { locksAt: str(after.locksAt) } }
   return null
 }
 

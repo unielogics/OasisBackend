@@ -36,7 +36,7 @@ export interface SessionAuthorizerDeps {
 export interface KioskResolver {
   resolveContext(req: FastifyRequest, opts?: { touch?: boolean }): Promise<KioskAuthContext | null>
   bindActor(req: FastifyRequest, ctx: KioskAuthContext, required: boolean): Promise<void>
-  /** The live registered device named by the request's device cookie, or null. */
+  /** The live shop browser (one that unlocked at the shop) named by the request's device cookie, or null. */
   liveDeviceOf(req: FastifyRequest): Promise<string | null>
 }
 
