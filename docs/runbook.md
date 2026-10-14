@@ -647,12 +647,15 @@ step. **Kiosk mode is on by default**: the sign-in page is the keypad. Typing **
 (managers need it for Settings, reports, prices and the team).
 
 "At the shop" means **the shop's internet connection**: a PIN works only from an address on the shop's list (Settings → Kiosk → Shop
-network). From anywhere else the keypad says "PINs work only at the shop" and the PIN is never checked.
+network). From anywhere else the keypad says "PINs work only at the shop" and the PIN is never checked. **An unlocked kiosk also works
+only on the shop's Wi-Fi**: a phone or tablet that unlocked at the shop and then leaves (or drops to mobile data) is refused on every
+screen until it is back on the shop's Wi-Fi; it stays unlocked, so it works again as soon as it is back. Signing in with email and
+password works from anywhere as before.
 
 **Set it up once**
 1. **The shop's network (Super Admin only).** Connect a phone, laptop or the tablet itself to the **shop's Wi-Fi** (not mobile data:
    turn mobile data off on a phone), sign in as the Super Admin (on the tablet: type 0218 on the keypad), and open Settings → Kiosk →
-   Shop network. It shows "Your address: 203.0.113.7". Tap **This is the shop's network**. Every device on the shop's Wi-Fi shares
+   Shop network. It shows "Your connection: 203.0.113.7". Tap **This is the shop's network**. Every device on the shop's Wi-Fi shares
    that address, so it does not have to be the tablet. If the screen says your address changed, you switched networks: check the
    Wi-Fi and try again. Managers can see this list but only the Super Admin can add or remove addresses.
    **Before you tap, on the device you use: turn off any VPN and iCloud Private Relay** (iPhone/iPad: Settings → Wi-Fi → (i) next to
@@ -662,7 +665,7 @@ network). From anywhere else the keypad says "PINs work only at the shop" and th
    count as at the shop, though they would still need a PIN) and the tablet would still be refused. The surest device is the tablet
    itself (type 0218 on its keypad). Do the same on the **tablet**: no VPN, Private Relay off for the shop Wi-Fi, or its PINs never
    work.
-2. **PINs (any manager).** Settings → Kiosk → People: for each person who opens the tablet, **Set PIN** (type 8 digits twice) or
+2. **PINs (any manager).** Settings → Kiosk → Staff PINs: for each person who opens the tablet, **Set PIN** (type 8 digits twice) or
    **Generate** and give it to them (it is shown once; write nothing down where customers can see it). A PIN can't start with 0218,
    repeat a digit, run in a row (12345678), repeat a pattern, be a date, be one of that person's last 3 PINs, or be someone else's PIN
    (the screen then just says "Choose another PIN"). Only people with "Shows on the kiosk" ticked can open it.
@@ -670,7 +673,7 @@ network). From anywhere else the keypad says "PINs work only at the shop" and th
    means the address you added is not the tablet's: Settings → Kiosk → Shop network → **Remove** it, check step 1's VPN / Private
    Relay / Wi-Fi Assist settings, and add it again, best from the tablet itself). Type a PIN: the board opens.
    Settings → Kiosk lists the tablet as a shop browser ("Shop browser 1 · Safari on iPad"): rename it ("Front desk tablet"). Recent
-   kiosk events show "Unlocked · Marco R.".
+   kiosk events show "Unlocked · Front desk tablet · Opened by Marco R.".
 4. On the tablet, turn on the system's own guided access / screen pinning and a screen lock, so the browser can't be left.
 5. If customers use the shop's Wi-Fi, give them a separate **guest network** if the router allows it: anyone on the shop's Wi-Fi
    counts as "at the shop" (they would still need a PIN).
@@ -680,19 +683,27 @@ locks by itself at its lock time; anyone with a PIN opens it again. A manager ca
 signs out after 15 minutes without use (4 hours at most); the next unlock, Lock all, locking or removing the browser and turning kiosk
 mode on or off sign it out too.
 
-**Someone leaves.** Deactivate them (Team): their PIN stops working at once. To stop just the PIN: Settings → Kiosk → People → Remove
-PIN. Changing or removing a PIN does not lock the tablet. Unticking "Shows on the kiosk" also stops their PIN.
+**Someone leaves.** Deactivate them (Team): their PIN stops working at once. To stop just the PIN: Settings → Kiosk → Staff PINs →
+Remove PIN. Changing or removing a PIN does not lock the tablet. Unticking "Shows on the kiosk" also stops their PIN.
 
-**The internet provider changed the shop's address** (the keypad on the tablet suddenly says "PINs work only at the shop"): the tablet's
-refused PIN appears in Settings → Kiosk → "PIN tried from a new network" as "Front desk tablet tried from a new network", with the new
-address. The Super Admin taps **Add this network** (from anywhere, even away from the shop), and the tablet works again. **Check the
-browser's name first**: a "shop browser" is any browser that once unlocked at the shop, which can be an employee's own phone; that
-phone typing a PIN from home shows up the same way, and approving it would make their home "the shop". Approve only entries whose
-browser is the tablet (that is why step 3 renames it "Front desk tablet"; remove in Settings → Kiosk any shop browser you do not
-expect). An entry from an "unknown browser" (not a shop browser) needs care: add it only if you know it was someone at the shop. Remove the old address
-(Settings → Kiosk → Shop network → Remove) once it is no longer used. Note: **5G home internet and Starlink-style connections change
-their address often, and share it with other customers** of the same provider: expect to approve new addresses from time to time, and
-know that other people behind that shared address count as "at the shop" (they would still need a valid PIN).
+**The internet provider changed the shop's address** (the keypad on the tablet suddenly says "PINs work only at the shop", and an
+unlocked tablet stops working): the tablet's refused try appears in Settings → Kiosk → "PIN tried from a new network" as "Front desk
+tablet tried from a new network", with the new address. When the shop's usual network has not been used since that try, the Super Admins
+also get a **Needs attention** alert on the Operations board: "The shop's internet address may have changed: Front desk tablet was
+refused from a new address. A Super Admin can add it in Settings → Kiosk." (shown about 10 minutes after the try; it goes by itself once
+the address is added or the shop's network is used again). The Super Admin taps **Add this network** (from anywhere, even away from
+the shop), and the tablet works again.
+**Before you approve, check the entry.** Approve an entry from a shop browser only when **both** are true: the browser is the tablet
+("Front desk tablet": that is why step 3 renames it), and the screen says the shop's network has been quiet since that try (nobody used
+the kiosk at the shop after it). A "shop browser" is any browser that once unlocked at the shop, which can be an employee's own phone:
+the same phone tried from home shows up the same way, and while the tablet keeps working at the shop the screen says the shop's network
+is still in use: that is not a provider change, do not approve it (approving would make their home "the shop"). Remove in Settings →
+Kiosk any shop browser you do not expect. Approve an entry from an "unknown browser" (not a shop browser) only when you know it was
+someone at the shop. If the alert appears late in the evening and goes by itself the next morning when the tablet is used, it was a
+shop browser away from the shop, not the provider: nothing to approve. Remove the old address (Settings → Kiosk → Shop network →
+Remove) once it is no longer used. Note: **5G home internet and Starlink-style connections change their address often, and share it
+with other customers** of the same provider: expect to approve new addresses from time to time, and know that other people behind that
+shared address count as "at the shop" (they would still need a valid PIN).
 
 **"Too many wrong PINs"** (the keypad says a manager needs to clear it): after 5 wrong PINs from the shop (3 on one tablet) the keypad
 makes people wait (2 seconds, then 4, 8 ... up to 5 minutes); after 30 in a row from the shop's address (20 on one tablet) it is locked
@@ -700,7 +711,7 @@ out. A manager: Settings → Kiosk → the shop network (or the browser) → **C
 and add "Many wrong PINs on every kiosk" to Recent kiosk events: check who is at the tablets, and change the PINs that may be known.
 
 **Lost, stolen or replaced tablet**: Settings → Kiosk → the browser → **Remove** (its cookie never works again, and anyone signed in on
-it is signed out). A new tablet becomes a shop browser at its first unlock at the shop. "Lock all kiosks" locks every tablet now
+it is signed out). Away from the shop's Wi-Fi an unlocked tablet or phone already shows nothing (see above), but Remove it anyway. A new tablet becomes a shop browser at its first unlock at the shop. "Lock all kiosks" locks every tablet now
 without removing anything (it also signs out anyone signed in on a tablet).
 
 **Turn it off** (rollback): Settings → Kiosk → Kiosk mode off. Every kiosk session ends and the sign-in page shows the email form
