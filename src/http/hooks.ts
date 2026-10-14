@@ -5,7 +5,7 @@ import { assertValidKey } from '../platform/idempotency.js'
 import type { Env } from '../config/env.js'
 import type { RouteRecord, RouteAccess } from './access.js'
 import { isIdempotentHandler } from './idempotent.js'
-import { isKioskContext } from './authorizer.js'
+import { isKioskContext, type AuthContext } from './authorizer.js'
 import type { RateLimits } from './rate-limit.js'
 import type { AppInstance } from './types.js'
 
@@ -115,10 +115,18 @@ export function installRequestHooks(app: AppInstance, limits?: RateLimits): void
       return
     }
 
-    const ctx = await app.authorizer.resolve(req)
+    // a refusal while resolving (a kiosk away from the shop, ADR 0180 A13) is answered after the budget is charged, like a 401
+    let ctx: AuthContext | null = null
+    let refused: unknown = null
+    try {
+      ctx = await app.authorizer.resolve(req)
+    } catch (e) {
+      refused = e
+    }
     if (ctx) req.auth = ctx
     await limits?.charge(req, reply)
     if (UNSAFE.has(req.method)) assertOriginAllowed(req, origins)
+    if (refused) throw refused
     if (!ctx) throw new AppError('UNAUTHENTICATED')
     // A kiosk (ADR 0180) reaches only the routes on its list, before any permission check: everything else is 403, fail-closed.
     const kiosk = isKioskContext(ctx) ? ctx : null

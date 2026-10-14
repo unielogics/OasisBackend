@@ -1,5 +1,7 @@
 // The event stream for a kiosk (ADR 0180): ops, messages and settings, never the per-person notifications (nor payments, which needs
-// pay.reports); at most 8 streams per DEVICE; the periodic re-check ends a stream once the kiosk locks.
+// pay.reports); at most 8 streams per DEVICE; the periodic re-check ends a stream once the kiosk locks; only from the shop's network
+// (A13: refused at connect from anywhere else, ended once the network is removed). The streams here connect from 127.0.0.1, which
+// each test adds as a shop network.
 import { sql } from 'kysely'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useHarness, type KioskSession } from '../auth/harness.js'
@@ -19,6 +21,13 @@ describe('kiosk event streams', () => {
     return `http://127.0.0.1:${(h.t.app.server.address() as { port: number }).port}/api/v1/events`
   }
 
+  /** kioskSetup, with 127.0.0.1 (where these streams connect from) as a shop network too. */
+  async function setup() {
+    const w = await h.kioskSetup()
+    const localNet = await h.addShopNetwork(w.admin, '127.0.0.1')
+    return { ...w, localNet }
+  }
+
   async function open(k: Pick<KioskSession, 'cookie'>): Promise<SseClient> {
     const c = await openSse(await url(), { cookie: k.cookie })
     clients.push(c)
@@ -26,7 +35,7 @@ describe('kiosk event streams', () => {
   }
 
   it('subscribes to ops, messages and settings; notifications and payments are refused', async () => {
-    const { kiosk } = await h.kioskSetup()
+    const { kiosk } = await setup()
     const c = await open(kiosk)
     expect(c.status).toBe(200)
     const ready = await c.waitFor((f) => f.event === 'ready')
@@ -37,7 +46,7 @@ describe('kiosk event streams', () => {
   })
 
   it('ends the stream once the kiosk is locked', async () => {
-    const { kiosk } = await h.kioskSetup()
+    const { kiosk } = await setup()
     const c = await open(kiosk)
     await c.waitFor((f) => f.event === 'ready')
     expect((await h.kioskCall('POST', 'kiosk/lock', kiosk)).statusCode).toBe(204)
@@ -46,7 +55,7 @@ describe('kiosk event streams', () => {
   })
 
   it('caps open streams per device, not per address or per person', async () => {
-    const { admin, kiosk } = await h.kioskSetup()
+    const { admin, kiosk } = await setup()
     for (let i = 0; i < 8; i++) {
       const c = await open(kiosk)
       expect(c.status, `stream ${i + 1}`).toBe(200)
@@ -58,5 +67,20 @@ describe('kiosk event streams', () => {
     const mine = await openSse(await url(), { cookie: admin.cookie })
     clients.push(mine)
     expect(mine.status).toBe(200)
+  })
+  it('is refused at connect away from the shop, and ends once the shop network it uses is removed; the session stays', async () => {
+    const { admin, kiosk, localNet } = await setup()
+    expect((await h.call('DELETE', `kiosk/networks/${localNet}`, { session: admin })).statusCode).toBe(204)
+    const refused = await open(kiosk)
+    expect(refused.status).toBe(403)
+    await h.addShopNetwork(admin, '127.0.0.1')
+    const c = await open(kiosk)
+    expect(c.status).toBe(200)
+    await c.waitFor((f) => f.event === 'ready')
+    const net = await h.t.db.selectFrom('kiosk_networks').select('id').where(sql<boolean>`cidr = '127.0.0.1/32'::cidr`).executeTakeFirstOrThrow()
+    expect((await h.call('DELETE', `kiosk/networks/${net.id}`, { session: admin })).statusCode).toBe(204)
+    const ended = await Promise.race([c.ended.then(() => true), sleep(3000).then(() => false)])
+    expect(ended).toBe(true)
+    expect((await h.kioskCall('GET', 'kiosk/me', kiosk)).statusCode).toBe(200) // from the tablet's shop address: still unlocked
   })
 })

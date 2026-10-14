@@ -125,7 +125,7 @@ const dividerFor = (bizDate: string, today: string, startsAt: Date, tz: string):
 export async function loadSnapshot(
   db: Executor,
   c: SchedulingCtx,
-  o: { window: OpsWindow; q?: string; canContact: boolean; manager?: boolean },
+  o: { window: OpsWindow; q?: string; canContact: boolean; manager?: boolean; superAdmin?: boolean },
 ): Promise<OpsSnapshot> {
   const now = c.clock.now()
   const today = toBizDate(now, c.tz)
@@ -297,7 +297,7 @@ export async function loadSnapshot(
 
   const [kpis, alerts, categoryCounts] = await Promise.all([
     loadKpis(db, c, opsRows),
-    loadAlerts(db, c, { manager: o.manager, preloaded: opsRows }),
+    loadAlerts(db, c, { manager: o.manager, superAdmin: o.superAdmin, preloaded: opsRows }),
     loadCategoryCounts(db, c, opsRows),
   ])
   return {

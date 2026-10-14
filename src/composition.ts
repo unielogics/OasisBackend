@@ -3,6 +3,7 @@
 import type { AppDeps } from './app.js'
 import type { StorageProvider } from './integrations/ports/storage.js'
 import { dbMembershipPort } from './modules/memberships/port.js'
+import { kioskAlertSource } from './modules/kiosk/alerts.js'
 import { messagingAlertSource } from './modules/messaging/adapters/alerts.js'
 import { createDbPaymentOutbox } from './modules/messaging/adapters/payments.js'
 import { MessagingClosureNotifier, MessagingEmergencyNotifier } from './modules/messaging/adapters/settings.js'
@@ -27,13 +28,16 @@ import type { Db } from './platform/db.js'
 
 /**
  * Needs Attention alerts 10-12: unread replies and a down SMS device (messaging), money waiting on its processor (payments-sync), and
- * Square (ADR 0171): payments to match, failed card refunds, invoices overpaid through Square, Square's health.
+ * Square (ADR 0171): payments to match, failed card refunds, invoices overpaid through Square, Square's health; and the kiosk's
+ * "The shop's internet address may have changed" (ADR 0180 A15).
  */
 export const productionExternalAlerts: ExternalAlertSource = combineExternalAlerts(
   messagingAlertSource,
   // a card refund the Square job sends is not confirmed by hand: its waiting alert offers Review (read at each listing)
   sqspExternalAlertsWith({ squareSendsRefunds: () => squareSendsRefunds(squareEnv()) }),
   squareExternalAlerts,
+  // kiosk mode (ADR 0180 A15): the shop's internet address may have changed (Super Admins)
+  kioskAlertSource,
 )
 
 type MessagingDeps = Pick<AppDeps, 'db' | 'clock' | 'env'> & { newId?: NewId }

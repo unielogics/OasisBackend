@@ -57,7 +57,7 @@ export interface ScanResult {
 }
 
 export async function scanAlertsFor(db: Db, c: SchedulingCtx): Promise<ScanResult> {
-  const alerts = await loadAlerts(db, c, { manager: true })
+  const alerts = await loadAlerts(db, c, { manager: true, superAdmin: true })
   const { hash, keys } = alertSetKey(alerts)
   return transaction(db, async (tx) => {
     const prev = await tx

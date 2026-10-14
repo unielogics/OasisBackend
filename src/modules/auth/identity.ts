@@ -10,6 +10,7 @@ import { RbacService } from '../rbac/service.js'
 import { PeopleService } from '../people/employees.js'
 import { RolesService } from '../people/roles.js'
 import { unconfiguredBusinessHours, type BusinessHoursPort } from '../people/business-hours.js'
+import { KioskNetworkCache } from '../kiosk/network.js'
 import { kioskKey } from '../kiosk/pin.js'
 import { KioskService } from '../kiosk/service.js'
 import { KioskUnlockGuard } from '../kiosk/throttle.js'
@@ -62,6 +63,8 @@ export interface Identity {
   /** Kiosk mode (ADR 0180): employees' PINs, the shop's networks, shop browsers, kiosk sessions, the acting employee. */
   readonly kiosk: KioskService
   readonly kioskGuard: KioskUnlockGuard
+  /** The kiosk's in-memory shop-network answers (30 s) and last-seen write throttle. */
+  readonly kioskNetworks: KioskNetworkCache
   readonly authorizer: Authorizer
 }
 
@@ -75,6 +78,7 @@ export function createIdentity(o: IdentityOptions): IdentityAuthorizer {
   const throttle = new LoginThrottle(o.clock, o.throttle ?? DEFAULT_THROTTLE)
   const notifier = o.notifier ?? new InMemoryNotifier()
   const kioskGuard = new KioskUnlockGuard(o.clock)
+  const kioskNetworks = new KioskNetworkCache(() => o.clock.now().getTime())
   const kiosk = new KioskService({
     db: o.db,
     clock: o.clock,
@@ -82,6 +86,7 @@ export function createIdentity(o: IdentityOptions): IdentityAuthorizer {
     env: o.env,
     pinKey: kioskKey(o.env),
     guard: kioskGuard,
+    networks: kioskNetworks,
     userSessions: sessions,
     defaultLocationId: o.locationId,
     warn: o.warn,
@@ -134,6 +139,7 @@ export function createIdentity(o: IdentityOptions): IdentityAuthorizer {
     roles,
     kiosk,
     kioskGuard,
+    kioskNetworks,
     authorizer: base,
   }
   return Object.assign(base, { identity })

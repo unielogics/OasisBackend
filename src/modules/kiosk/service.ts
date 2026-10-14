@@ -6,7 +6,10 @@
 // Unlock (POST /kiosk/unlock {pin}): kiosk mode off -> 409; the caller's address in no shop network -> 403 KIOSK_NOT_AT_SHOP before any
 // PIN work (the try is listed for the Super Admin, capped and rate-limited); then the per-address and per-browser throttle; then the
 // PIN's lookup must name an active or invited employee shown on the kiosk. Success opens a kiosk session for everyone until the lock
-// time, "Opened by Marco R.", and gives a browser without a device cookie its own ("Shop browser N").
+// time, "Opened by Marco R.", and gives a browser without a device cookie its own ("Shop browser N"). Every request of an unlocked
+// kiosk must come from a shop network too (A13: 403 KIOSK_NOT_AT_SHOP, the session kept, the try listed); the networks' last_seen_at
+// says the shop is in use (A14: a refused entry's shopActiveSince), and alerts.ts tells the Super Admins when the address probably
+// changed (A15).
 import type { FastifyRequest } from 'fastify'
 import { sql, type Selectable } from 'kysely'
 import type { Env } from '../../config/env.js'
@@ -33,7 +36,7 @@ import { dayInfo } from '../settings/day-info.js'
 import { emergencySnapshot, getActiveEmergency } from '../settings/emergency.js'
 import { getHours } from '../settings/hours.js'
 import { kioskLockTime, type KioskLock } from './lock-time.js'
-import { callerAddress, networkLabel, networkOf } from './network.js'
+import { callerAddress, networkLabel, networkOf, type KioskNetworkCache, type NetworkMatch } from './network.js'
 import {
   generatePin,
   KIOSK_PIN_HISTORY,
@@ -52,6 +55,7 @@ import {
   purgeKioskSessions,
   revokeKioskSessions,
   revokeUserSessionsOnKiosks,
+  touchKioskSession,
 } from './sessions.js'
 import { findKioskActor, listKioskStaff, type KioskPerson } from './staff.js'
 import {
@@ -72,6 +76,8 @@ export interface KioskServiceDeps {
   /** The kiosk PIN key (pin.ts kioskKey, from SESSION_SECRET). */
   pinKey: Buffer
   guard: KioskUnlockGuard
+  /** The in-memory shop-network answers for kiosk-session requests (30 s) and the last-seen write throttle. */
+  networks: KioskNetworkCache
   /** The user sessions: an unlock signs out a user session on the browser. */
   userSessions: SessionService
   /** The location of a request that names no device (single-location shop). */
@@ -143,6 +149,11 @@ export interface KioskRefusedView {
   /** A try carried the cookie of a browser that unlocked at the shop before: the shop's address probably changed. */
   fromKnownBrowser: boolean
   browserName: string | null
+  /**
+   * A shop network was in use (an unlock, a kiosk request or the keypad's status from it) after this address was first refused: the
+   * shop's usual address still works, so this is NOT the provider changing it (likely a phone away from the shop).
+   */
+  shopActiveSince: boolean
 }
 
 export interface KioskMe {
@@ -311,15 +322,33 @@ export class KioskService {
 
   // --- the request context -------------------------------------------------------------------------------------------------------
 
-  /** A kiosk context for the request's kiosk cookies, or null (no session, locked, revoked, other device, kiosk mode off). */
+  /**
+   * A kiosk context for the request's kiosk cookies, or null (no session, locked, revoked, other device, kiosk mode off). An unlocked
+   * kiosk works only at the shop (ADR 0180 A13): a request from an address in no shop network is 403 KIOSK_NOT_AT_SHOP, listed like a
+   * refused PIN, and the session is kept (it works again once the browser is back on the shop's Wi-Fi).
+   */
   async resolveContext(req: FastifyRequest, opts: { touch?: boolean } = {}): Promise<KioskAuthContext | null> {
+    const { db, clock } = this.d
     const s = await lookupKioskSession(
-      this.d.db,
-      this.d.clock,
+      db,
+      clock,
       { session: this.sessionToken(req), device: this.deviceToken(req) },
-      opts,
+      { touch: false },
     )
     if (!s) return null
+    const address = callerAddress(req.ip)
+    const at = await this.shopNetworkOf(s.locationId, address)
+    if (!at.id) {
+      await this.recordRefused(s.locationId, address, { id: s.deviceId, name: s.deviceName }).catch((e: unknown) =>
+        this.d.warn?.('kiosk: could not record a kiosk request from outside the shop', { error: String(e) }),
+      )
+      throw new AppError('KIOSK_NOT_AT_SHOP', {
+        detail: 'The kiosk works only at the shop, on the shop’s Wi-Fi. It works again once this device is back on it.',
+        meta: { networkSet: at.networkSet },
+      })
+    }
+    await this.markNetworkSeen(at.id)
+    if (opts.touch !== false) await touchKioskSession(db, clock, s)
     return {
       kind: 'kiosk',
       userId: null,
@@ -371,6 +400,7 @@ export class KioskService {
     const enabled = (await getSetting(db, locationId, 'kiosk.enabled')).value
     const networkSet = await this.hasNetworks(db, locationId)
     const net = networkSet ? await this.matchNetwork(db, locationId, callerAddress(req.ip)) : null
+    if (net) await this.markNetworkSeen(net.id)
     const s = device
       ? await lookupKioskSession(db, clock, { session: this.sessionToken(req), device: this.deviceToken(req) }, { touch: false })
       : null
@@ -482,9 +512,15 @@ export class KioskService {
         const netLockedOut = netFailures >= KIOSK_ADDRESS_RULE.lockout
         await tx
           .updateTable('kiosk_networks')
-          .set({ failed_attempts: netFailures, last_failed_at: now, ...(netLockedOut ? { locked_out_at: now } : {}) })
+          .set({
+            failed_attempts: netFailures,
+            last_failed_at: now,
+            last_seen_at: now,
+            ...(netLockedOut ? { locked_out_at: now } : {}),
+          })
           .where('id', '=', net.id)
           .execute()
+        this.d.networks.markedSeen(net.id)
         let devFailures = 0
         let devLockedOut = false
         if (dev) {
@@ -539,6 +575,7 @@ export class KioskService {
         .set({ failed_attempts: 0, last_failed_at: null, last_seen_at: now })
         .where('id', '=', net.id)
         .execute()
+      this.d.networks.markedSeen(net.id)
       const opener = { id: who.id, name: displayName(who.first, who.last) }
       let device: { id: string; name: string; token: string }
       if (dev) {
@@ -988,10 +1025,14 @@ export class KioskService {
       await this.changed(tx, loc)
       return { id, created: true }
     })
+    this.d.networks.forget()
     return { network: await this.networkView(this.d.db, loc, r.id), created: r.created }
   }
 
-  /** DELETE /kiosk/networks/:id, Super Admin only: PINs stop working from that address (open kiosks stay open until they lock). */
+  /**
+   * DELETE /kiosk/networks/:id, Super Admin only: PINs stop working from that address, and so does an unlocked kiosk there (within 30
+   * seconds: the kiosk's network answers are reused that long in other processes; at once in this one). Its sessions are kept.
+   */
   async removeNetwork(admin: KioskAdmin, id: string): Promise<void> {
     if (!admin.isSuper) throw new AppError('SUPER_ONLY')
     if (!isUuid(id)) throw new AppError('NOT_FOUND')
@@ -1013,6 +1054,7 @@ export class KioskService {
       })
       await this.changed(tx, admin.locationId)
     })
+    this.d.networks.forget()
   }
 
   /** POST /kiosk/networks/:id/clear-lockout (a manager): the shop address's wrong-PIN counter starts over. */
@@ -1215,6 +1257,28 @@ export class KioskService {
     return kioskLockTime({ now, tz, today: info(today), yesterday: info(yesterday) })
   }
 
+  /** The shop network of a kiosk-session request's address, from the 30-second answers when there is one. */
+  private async shopNetworkOf(locationId: string, address: string | null): Promise<NetworkMatch> {
+    if (!address) return { id: null, networkSet: await this.hasNetworks(this.d.db, locationId) }
+    const cached = this.d.networks.get(locationId, address)
+    if (cached) return cached
+    const row = await this.matchNetwork(this.d.db, locationId, address)
+    const match: NetworkMatch = { id: row?.id ?? null, networkSet: !!row || (await this.hasNetworks(this.d.db, locationId)) }
+    this.d.networks.set(locationId, address, match)
+    return match
+  }
+
+  /** The shop network is in use now: its last_seen_at, written at most once in 5 minutes per network by this process. */
+  private async markNetworkSeen(networkId: string): Promise<void> {
+    if (!this.d.networks.shouldMarkSeen(networkId)) return
+    await this.d.db
+      .updateTable('kiosk_networks')
+      .set({ last_seen_at: this.d.clock.now() })
+      .where('id', '=', networkId)
+      .execute()
+      .catch((e: unknown) => this.d.warn?.('kiosk: could not mark a shop network as seen', { error: String(e) }))
+  }
+
   /** The shop network `address` belongs to (IPv4 exact, IPv6 by its /64), or null. */
   private async matchNetwork(db: Executor, locationId: string, address: string | null): Promise<NetworkRow | null> {
     if (!address) return null
@@ -1238,7 +1302,11 @@ export class KioskService {
    * cookie of one that unlocked at the shop before. Rows older than 30 days go, and past 50 rows the oldest of unknown browsers go
    * first, so a flood of addresses can neither grow the table nor push out the shop tablet's entry.
    */
-  private async recordRefused(locationId: string, address: string | null, device: DeviceRow | null): Promise<void> {
+  private async recordRefused(
+    locationId: string,
+    address: string | null,
+    device: { id: string; name: string } | null,
+  ): Promise<void> {
     const cidr = networkOf(address)
     if (!cidr) return
     const add = this.d.guard.refusedTry(cidr)
@@ -1426,7 +1494,25 @@ export class KioskService {
     const rows = await db
       .selectFrom('kiosk_refused_networks as r')
       .leftJoin('kiosk_devices as d', 'd.id', 'r.known_device_id')
-      .select(['r.id', 'r.cidr', 'r.first_seen_at', 'r.last_seen_at', 'r.attempts', 'r.known_device_id', 'r.known_device_name', 'd.name'])
+      .select((eb) => [
+        'r.id',
+        'r.cidr',
+        'r.first_seen_at',
+        'r.last_seen_at',
+        'r.attempts',
+        'r.known_device_id',
+        'r.known_device_name',
+        'd.name',
+        eb
+          .exists(
+            eb
+              .selectFrom('kiosk_networks as n')
+              .select('n.id')
+              .whereRef('n.location_id', '=', 'r.location_id')
+              .whereRef('n.last_seen_at', '>', 'r.first_seen_at'),
+          )
+          .as('shop_active_since'),
+      ])
       .where('r.location_id', '=', locationId)
       .where('r.last_seen_at', '>=', since)
       .orderBy('r.last_seen_at', 'desc')
@@ -1441,6 +1527,7 @@ export class KioskService {
       attempts: r.attempts,
       fromKnownBrowser: !!r.known_device_id || !!r.known_device_name,
       browserName: r.name ?? r.known_device_name,
+      shopActiveSince: !!r.shop_active_since,
     }))
   }
 

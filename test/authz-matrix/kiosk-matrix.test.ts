@@ -4,6 +4,7 @@
 //   on the list, 'actor'      -> 428 without X-Oasis-Employee, 422 with an unknown one, never 401/403 with a valid one,
 //                                403 CSRF_INVALID without the CSRF token
 //   on the list, 'none'       -> never 401/403/428; unsafe ones still need the CSRF token
+//   from outside the shop's networks -> 403 KIOSK_NOT_AT_SHOP on every listed route (ADR 0180 A13)
 //   the API contract marks exactly the listed operations x-oasis-kiosk; a bad entry stops the app from starting
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
@@ -37,11 +38,14 @@ describe('authz matrix: a kiosk (generated from the route registry and the kiosk
 
   it('covers every registered route', async () => {
     const routes = [...h.t.app.routeRegistry].filter((r) => !['/healthz', '/readyz'].includes(r.url))
-    const { device, kiosk: first } = await h.kioskSetup()
+    const { admin, device, kiosk: first } = await h.kioskSetup()
     const marco = await h.createUser({ email: 'marco@example.test', first: 'Marco', last: 'Rossi', roles: ['crew'] })
     let kiosk = first
+    // every call from its own address of the shop's IPv6 /64 (a kiosk works only at the shop, ADR 0180 A13)
+    await h.addShopNetwork(admin, '2001:db8:50::1')
     let ip = 0
-    const addr = () => `10.50.${Math.floor(ip / 200)}.${(ip++ % 200) + 1}`
+    const addr = () => `2001:db8:50::${(ip++ + 16).toString(16)}`
+    const away = () => `2001:db8:51::${(ip++ + 16).toString(16)}`
 
     const failures: string[] = []
     const check = (what: string, r: RouteRecord, res: { statusCode: number; body: string }, ok: boolean) => {
@@ -74,6 +78,8 @@ describe('authz matrix: a kiosk (generated from the route registry and the kiosk
       } else counts.none++
 
       const actor = mode === 'actor' ? marco.employeeId : undefined
+      const off = await h.kioskCall(method, url, kiosk, { body, actor, ip: away() })
+      check('away from the shop', r, off, off.statusCode === 403 && codeOf(off) === 'KIOSK_NOT_AT_SHOP')
       const ok = await h.kioskCall(method, url, kiosk, { body, actor, ip: addr() })
       check(
         'listed, with what it needs',

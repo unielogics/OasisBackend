@@ -275,14 +275,14 @@ export function buildAlerts(i: AlertInputs, bays: ReadonlyMap<string, number>): 
 export async function loadAlerts(
   db: Executor,
   c: SchedulingCtx,
-  o: { manager?: boolean; preloaded?: BoardRow[] } = {},
+  o: { manager?: boolean; superAdmin?: boolean; preloaded?: BoardRow[] } = {},
 ): Promise<Alert[]> {
   const now = c.clock.now()
   const [rows, settings, bayRows, external] = await Promise.all([
     o.preloaded ? Promise.resolve(o.preloaded) : loadOpsRows(db, c, now),
     loadSettingsBundle(db, c.locationId),
     db.selectFrom('bays').select(['id', 'number']).where('location_id', '=', c.locationId).execute(),
-    c.ports.externalAlerts.list(db, { locationId: c.locationId, now, manager: o.manager ?? false }),
+    c.ports.externalAlerts.list(db, { locationId: c.locationId, now, manager: o.manager ?? false, superAdmin: o.superAdmin ?? false }),
   ])
   return buildAlerts(
     { now, tz: c.tz, rows, ops: settings.ops, external },

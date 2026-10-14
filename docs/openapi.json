@@ -76207,7 +76207,7 @@
                                 "type": "null"
                               }
                             ],
-                            "description": "The last unlock from it"
+                            "description": "The last time it was in use: a PIN, an unlocked kiosk or the keypad from it (updated at most every 5 minutes)"
                           },
                           "lockedOut": {
                             "type": "boolean"
@@ -76308,6 +76308,10 @@
                           },
                           "lastSeenAt": {
                             "type": "string"
+                          },
+                          "shopActiveSince": {
+                            "description": "A shop network was in use after this address was first refused: the shop’s usual address still works, so this is not the provider changing it",
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -76317,7 +76321,8 @@
                           "lastSeenAt",
                           "attempts",
                           "fromKnownBrowser",
-                          "browserName"
+                          "browserName",
+                          "shopActiveSince"
                         ],
                         "type": "object"
                       },
@@ -77144,7 +77149,7 @@
                               "type": "null"
                             }
                           ],
-                          "description": "The last unlock from it"
+                          "description": "The last time it was in use: a PIN, an unlocked kiosk or the keypad from it (updated at most every 5 minutes)"
                         },
                         "lockedOut": {
                           "type": "boolean"
@@ -77232,7 +77237,7 @@
                               "type": "null"
                             }
                           ],
-                          "description": "The last unlock from it"
+                          "description": "The last time it was in use: a PIN, an unlocked kiosk or the keypad from it (updated at most every 5 minutes)"
                         },
                         "lockedOut": {
                           "type": "boolean"
@@ -77357,7 +77362,7 @@
                           "type": "null"
                         }
                       ],
-                      "description": "The last unlock from it"
+                      "description": "The last time it was in use: a PIN, an unlocked kiosk or the keypad from it (updated at most every 5 minutes)"
                     },
                     "lockedOut": {
                       "type": "boolean"

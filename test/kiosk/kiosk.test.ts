@@ -94,7 +94,7 @@ describe('kiosk mode is on by default (ADR 0180 amendment)', () => {
     expect(await h.t.db.selectFrom('kiosk_sessions').selectAll().execute()).toHaveLength(0)
     const ov = await overview(h, s)
     expect(ov.refused).toEqual([
-      { id: expect.any(String), address: SHOP, firstSeenAt: expect.any(String), lastSeenAt: expect.any(String), attempts: 1, fromKnownBrowser: false, browserName: null },
+      { id: expect.any(String), address: SHOP, firstSeenAt: expect.any(String), lastSeenAt: expect.any(String), attempts: 1, fromKnownBrowser: false, browserName: null, shopActiveSince: false },
     ])
   })
 
@@ -495,7 +495,7 @@ describe('unlocking', () => {
     expect(ev).toHaveLength(1)
     expect(ev[0]).toMatchObject({ employee_name: 'Marco R.', via: 'kiosk', kiosk_device_id: dev.id, user_id: null, audit_id: Number(a.id) })
 
-    const kiosk = { cookie: `oasis_kdev=${kdev.value}; oasis_ksid=${ksid.value}`, csrf: me.csrfToken as string }
+    const kiosk = { cookie: `oasis_kdev=${kdev.value}; oasis_ksid=${ksid.value}`, csrf: me.csrfToken as string, ip: shopIp }
     expect((await h.kioskCall('GET', 'kiosk/me', kiosk)).json().openedBy).toEqual({ id: marco.employeeId, name: 'Marco R.' })
     expect((await status(h, shopIp, kiosk.cookie)).json()).toEqual({
       enabled: true,
@@ -1117,14 +1117,15 @@ describe('rate limits are per browser', () => {
   it('one tablet is one caller, whatever the address; another tablet has its own budget', async () => {
     const { user, s } = await superAt(h)
     await h.addShopNetwork(s, SHOP)
+    await h.addShopNetwork(s, '2001:db8:77::1') // an IPv6 /64: many addresses of the shop
     const pin = await h.setPin(s, user.employeeId)
     const k1 = await h.unlock(null, pin, SHOP)
     const k2 = await h.unlock(null, pin, SHOP)
     expect(k1.device.id).not.toBe(k2.device.id)
     const codes: number[] = []
-    for (let i = 0; i < 14; i++) codes.push((await h.kioskCall('GET', 'kiosk/staff', k1, { ip: `10.77.0.${i + 1}` })).statusCode)
+    for (let i = 0; i < 14; i++) codes.push((await h.kioskCall('GET', 'kiosk/staff', k1, { ip: `2001:db8:77::${i + 10}` })).statusCode)
     expect(codes.slice(0, 12).every((c) => c === 200)).toBe(true)
     expect(codes.slice(12)).toEqual([429, 429])
-    expect((await h.kioskCall('GET', 'kiosk/staff', k2, { ip: '10.77.0.1' })).statusCode).toBe(200)
+    expect((await h.kioskCall('GET', 'kiosk/staff', k2, { ip: '2001:db8:77::10' })).statusCode).toBe(200)
   })
 })

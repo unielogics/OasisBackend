@@ -57,6 +57,8 @@ export interface KioskSession {
   /** "oasis_kdev=...; oasis_ksid=..." */
   cookie: string
   csrf: string
+  /** The shop address it was unlocked from: its requests come from there unless a call says otherwise (ADR 0180 A13). */
+  ip: string
   res: LightMyRequestResponse
 }
 
@@ -109,11 +111,11 @@ export interface Harness {
    * the browser of `device` (null: a browser without a device cookie, which gets one); throws unless it answers 200.
    */
   unlock(device: KioskDevice | null, pin?: string, ip?: string): Promise<KioskSession>
-  /** A request from an unlocked kiosk; `actor` becomes X-Oasis-Employee. */
+  /** A request from an unlocked kiosk (from the address it was unlocked at unless `ip` says otherwise); `actor` becomes X-Oasis-Employee. */
   kioskCall(
     method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     url: string,
-    k: Pick<KioskSession, 'cookie' | 'csrf'>,
+    k: Pick<KioskSession, 'cookie' | 'csrf'> & { ip?: string },
     o?: { actor?: string; body?: unknown; headers?: Record<string, string>; csrf?: boolean; ip?: string },
   ): Promise<LightMyRequestResponse>
   /**
@@ -188,6 +190,7 @@ export function useHarness(
     identity.rbac.clear()
     identity.throttle.reset()
     identity.kioskGuard.reset()
+    identity.kioskNetworks.reset()
     lastPin = KIOSK_PIN
     lastShopIp = SHOP_IP
   })
@@ -329,6 +332,7 @@ export function useHarness(
         token: c.value,
         cookie: `${dev.cookie}; ${c.name}=${c.value}`,
         csrf: me.csrfToken,
+        ip,
         res,
       }
     },
@@ -341,7 +345,7 @@ export function useHarness(
         csrf: c.csrf,
         body: c.body,
         headers,
-        ip: c.ip,
+        ip: c.ip ?? k.ip,
       })
     },
 

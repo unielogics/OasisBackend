@@ -163,6 +163,8 @@ export function registerEventsRoute(app: AppInstance): void {
           if (!now) return cleanup()
           for (const c of [...channels]) if (!canSubscribe(app, now, c as RealtimeChannel)) channels.delete(c)
         } catch (err) {
+          // a kiosk away from the shop (ADR 0180 A13): its stream ends like a locked one's
+          if (err instanceof AppError && err.code === 'KIOSK_NOT_AT_SHOP') return cleanup()
           req.log.warn({ err: (err as Error).message }, 'event stream re-check failed; keeping the stream')
         } finally {
           rechecking = false

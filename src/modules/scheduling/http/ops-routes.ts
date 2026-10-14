@@ -1,8 +1,10 @@
 // /ops/*, /calendar/*, /availability, /bays, /staff: the read side of Operations.
 import { access } from '../../../http/access.js'
+import type { AuthContext } from '../../../http/authorizer.js'
 import { z } from '../../../http/zod.js'
 import type { AppInstance } from '../../../http/types.js'
 import { AppError } from '../../../platform/errors.js'
+import { isSessionContext } from '../../auth/context.js'
 import { canSeeContact } from '../../people/redact.js'
 import { getAvailability } from '../availability-loader.js'
 import { loadAlerts } from '../alerts.js'
@@ -32,6 +34,9 @@ import { actorOf, ctxOf } from './shared.js'
 
 const TAGS = ['operations']
 
+/** A Super Admin acting as one (not viewing as a lesser role), or a test authorizer's '*': sees the alerts only they can act on. */
+const superAdminOf = (a: AuthContext): boolean => a.permissions.has('*') || (isSessionContext(a) && a.isSuper)
+
 export function registerOpsRoutes(app: AppInstance, ports: SchedulingPorts): void {
   app.get(
     '/ops/snapshot',
@@ -55,6 +60,7 @@ export function registerOpsRoutes(app: AppInstance, ports: SchedulingPorts): voi
         q: req.query.q,
         canContact: canSeeContact(req.auth!),
         manager: req.auth!.permissions.has('*') || req.auth!.permissions.has('set.billing'),
+        superAdmin: superAdminOf(req.auth!),
       }),
   )
 
@@ -89,6 +95,7 @@ export function registerOpsRoutes(app: AppInstance, ports: SchedulingPorts): voi
     async (req) => ({
       alerts: await loadAlerts(app.db, await ctxOf(app, req, ports), {
         manager: req.auth!.permissions.has('*') || req.auth!.permissions.has('set.billing'),
+        superAdmin: superAdminOf(req.auth!),
       }),
     }),
   )

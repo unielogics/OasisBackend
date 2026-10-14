@@ -2704,6 +2704,15 @@ unauthenticated. A kiosk context has `kind: 'kiosk'`, `userId: null`, the built-
 `jobs.status`, `jobs.checklist`, `cli.view`, `cli.contact`, `pay.collect`, `msg.send`; not a role, never assignable), no money limits,
 roles `Kiosk`, and the actor name `Kiosk · <device name>` until an employee is bound.
 
+**Only at the shop** (ADR 0180 A13). Every request a kiosk session authenticates (every listed route, `GET /kiosk/me`, `POST
+/kiosk/lock`, the event stream's connect) must come from a shop network address, by the unlock's rule (`req.ip`, IPv4 exactly, IPv6 by
+its /64); from anywhere else it is `403 KIOSK_NOT_AT_SHOP {meta.networkSet}` ("The kiosk works only at the shop, on the shop's Wi-Fi.
+It works again once this device is back on it."), before the route list. The session is NOT revoked: back on the shop's Wi-Fi the same
+browser works again. Kiosk mode off still wins (the session is invalid: 401). Each refusal is listed like a refused PIN (the session's
+browser as the known browser; written at most once a minute per address, the same caps). The address's answer is kept in memory 30
+seconds (an add, remove or approve in the same process drops it at once), so removing a network stops a kiosk there within 30 seconds;
+an open event stream then ends at its next re-check. A signed-in person (user session) is never checked.
+
 **The route list (fail-closed).** `src/modules/kiosk/allowlist.ts` lists every route a kiosk may call, as `none` or `actor`; the API
 contract marks each listed operation `x-oasis-kiosk: none|actor` (the dashboard generates its copy from it). Before any permission check a
 kiosk gets `403 KIOSK_FORBIDDEN` on every other route, even by direct URL; the person's own account routes (`GET /me`,
@@ -2730,7 +2739,7 @@ Reads ignore the header; with a user session present it is ignored too.
 
 **Per device.** Rate limits, idempotency keys (`kiosk:<device id>`), the ledger and saved-card request keys and the event-stream cap
 (8) count the device, whoever taps. The event stream gives a kiosk `ops`, `messages` and `settings`, never `notifications` (nor
-`payments`, which needs `pay.reports`); its 15-second re-check ends the stream after a lock, revoke or the lock time.
+`payments`, which needs `pay.reports`); its 15-second re-check ends the stream after a lock, revoke or the lock time, and once the kiosk is no longer at the shop.
 
 ### 31.2 The keypad and the unlocked kiosk
 
@@ -2783,7 +2792,7 @@ never an audit row).
 | PUT | `/kiosk/staff/:employeeId/pin` | `{pin}` or `{generate: true}` | `{employeeId, setAt, pin?}` (a generated PIN is shown once; `no-store`); `422 KIOSK_PIN_REJECTED` with the rule in `errors[0].message`: 8 digits, not starting with 0218, not one digit, no runs (with wrap), no repeating pattern of period 1 to 4 or doubled pairs, no date (YYYYMMDD / MMDDYYYY, 1900 to 2099), not a common PIN, not used by anyone else in the shop (the neutral "Choose another PIN."), not one of the employee's last 3; `409 KIOSK_PIN_INACTIVE` (deactivated); `404` (not of the shop); the tablet stays open; two people given the same PIN at once: one 200, one 422 |
 | DELETE | `/kiosk/staff/:employeeId/pin` | – | `204` (the PIN stops working and joins their history; nothing to do without one). Deactivating an employee removes their PIN too |
 | POST | `/kiosk/networks` | `{confirmAddress, label?}` or `{address, label?}` | **Super Admin only** (`403 SUPER_ONLY` otherwise, also while viewing as a lesser role). `{confirmAddress}`, "This is the shop's network", from any device on the shop Wi-Fi: adds the caller's own address (IPv4, or its IPv6 /64) only when it still equals the one the screen showed (`409 KIOSK_ADDRESS_CHANGED {meta.yourAddress}`; this cannot detect an address that was never the shop's, e.g. a VPN or iCloud Private Relay: runbook section 11); `{address}`: approves an entry of the refused list, from anywhere (`404 KIOSK_REFUSED_UNKNOWN` for any other address), and removes it from the list. `201 {network, created: true}`, or `200 {network, created: false}` when it already was one |
-| DELETE | `/kiosk/networks/:id` | – | **Super Admin only**. `204`: PINs stop working from that address (open kiosks stay open until they lock) |
+| DELETE | `/kiosk/networks/:id` | – | **Super Admin only**. `204`: PINs stop working from that address, and an unlocked kiosk there gets `403 KIOSK_NOT_AT_SHOP` within 30 seconds (its session is kept: it works again from a shop network) |
 | POST | `/kiosk/networks/:id/clear-lockout` | – | `KioskNetwork` (the address's wrong-PIN counter starts over) |
 | PATCH | `/kiosk/devices/:id` | `{name, version}` | `KioskDevice`; `412 VERSION_CONFLICT` |
 | DELETE | `/kiosk/devices/:id` | – | `204`; the cookie stops working for good, its session ends (`device_revoked`), and a manager signed in on it is signed out; a PIN typed later on that browser, at the shop, makes it a new shop browser |
@@ -2792,16 +2801,30 @@ never an audit row).
 | POST | `/kiosk/lock-all` | – | `{locked: n}` (`lock_all`); takes the shop's network rows, then its device rows, so an unlock in progress (a first one too) finishes and its session is ended too; every manager signed in on a shop browser is signed out (not counted in `locked`) |
 | PUT | `/kiosk/staff/:employeeId` | `{listed}` | `{id, name, status, listed}` ("Shows on the kiosk"; a hidden employee's PIN does not unlock either) |
 
-`KioskNetwork = {id, address ("203.0.113.7" or "2001:db8:1:2::/64"), label, addedBy, addedAt, lastSeenAt, failedAttempts, lockedOut}`;
-`KioskRefused = {id, address, firstSeenAt, lastSeenAt, attempts, fromKnownBrowser, browserName}` (`fromKnownBrowser`: a try carried the
-cookie of a browser that unlocked at the shop before, `browserName` its name: the shop's address probably changed; else an unknown
-browser; any browser that once unlocked at the shop counts, an employee's own phone too, so check `browserName` before approving);
+`KioskNetwork = {id, address ("203.0.113.7" or "2001:db8:1:2::/64"), label, addedBy, addedAt, lastSeenAt, failedAttempts, lockedOut}`
+(`lastSeenAt`: the network was last in use: an unlock try, a kiosk request or `GET /kiosk/status` from it; written at most every 5
+minutes per network and process, at once by an unlock try);
+`KioskRefused = {id, address, firstSeenAt, lastSeenAt, attempts, fromKnownBrowser, browserName, shopActiveSince}` (`fromKnownBrowser`: a
+try, a PIN or a kiosk request, carried the cookie of a browser that unlocked at the shop before, `browserName` its name; else an unknown
+browser; any browser that once unlocked at the shop counts, an employee's own phone too. `shopActiveSince`: a shop network of the
+location was in use after the entry's `firstSeenAt`, so the shop's usual address still works and this is NOT the provider changing it,
+likely a shop browser away from the shop. A provider change looks like `fromKnownBrowser: true, shopActiveSince: false` with the tablet's
+name);
 `KioskDevice = {id, name, state: unlocked|locked|locked_out|revoked, locksAt, openedBy, lastSeenAt, lastIp, lastUa,
 failedAttempts, createdAt, createdBy, version}`. Every change is audited (`kiosk.pin.set|remove` (never the PIN),
 `kiosk.network.add|remove|lockout|lockout.clear`, `kiosk.device.register|rename|revoke|lock|lockout|lockout.clear`, `kiosk.mode.on|off`,
 `kiosk.unlock`, `kiosk.unlock.failed`, `kiosk.unlock.alert`, `kiosk.lock`, `kiosk.lock_all`, `kiosk.staff.listed`) with the device in
 `audit_log.kiosk_device_id` where there is one, and publishes `settings.changed {section: 'kiosk'}` (a refused try only when it came from
 a known browser). `PUT /kiosk/code` and `POST /kiosk/devices` ("Make this a kiosk") are gone.
+
+**Needs attention: "The shop's internet address may have changed"** (ADR 0180 A15; `kiosk_address_changed`, amber, Super Admins only,
+acting as one: `GET /ops/alerts` and `GET /ops/snapshot`). Title "The shop's internet address may have changed", text "Front desk tablet
+was refused from a new address. A Super Admin can add it in Settings → Kiosk.", `appointmentId` null, key `kiosk_address_changed:<refused
+id>`. Shown while kiosk mode is on for the newest refused entry that came from a live (not removed) shop browser, is at least 10 minutes
+old, and has `shopActiveSince` false; at most one at a time, never for unknown browsers. Computed on read like the other alerts: it is
+never repeated while that entry stands, and it goes by itself when the address is approved, the entry ages out (30 days) or is pruned,
+the browser is removed, or a shop network is in use again (e.g. an employee's phone refused at home overnight: the alert clears when
+the tablet is used at the shop in the morning).
 
 **A manager on a shop browser.** `POST /auth/login` (and `POST /auth/invite/accept`) from a browser carrying a live device cookie (one
 that unlocked at the shop) opens a short session (15 minutes idle, 4 hours at most, `sessions.kiosk_device_id`); `GET /me` then answers

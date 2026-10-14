@@ -1,7 +1,8 @@
 // Kiosk sessions (ADR 0180): server-side rows addressed by the sha256 of an opaque 256-bit token in the HttpOnly kiosk cookie, like
 // user sessions (ADR 0008). A session is only valid together with the cookie of the live device it was made on, and only while kiosk
 // mode is on; it ends at its lock time (absolute, no idle expiry) or when it is revoked (lock, lock all, the device locked or removed,
-// kiosk mode off, a new unlock on the same device). It records whose PIN opened it (ADR 0180 amendment).
+// kiosk mode off, a new unlock on the same device). It records whose PIN opened it (ADR 0180 amendment). Each request must also come
+// from a shop network (A13: KioskService.resolveContext checks it after this lookup; the session is kept when it does not).
 import { isIP } from 'node:net'
 import { sql } from 'kysely'
 import type { Clock } from '../../platform/clock.js'
@@ -23,6 +24,7 @@ export interface KioskSessionRecord {
   expiresAt: Date
   lockRule: KioskLockRule
   csrfSecret: string
+  lastSeenAt: Date
 }
 
 export const clientIp = (ip: string | null | undefined): string | null => (ip && isIP(ip) ? ip : null)
@@ -70,12 +72,7 @@ export async function lookupKioskSession(
   if (row.enabled !== true) return null
   const now = clock.now().getTime()
   if (now >= row.expires_at.getTime()) return null
-  if (opts.touch !== false && now - row.last_seen_at.getTime() >= KIOSK_TOUCH_MS) {
-    const at = new Date(now)
-    await db.updateTable('kiosk_sessions').set({ last_seen_at: at }).where('id', '=', id).execute()
-    await db.updateTable('kiosk_devices').set({ last_seen_at: at }).where('id', '=', row.device_id).execute()
-  }
-  return {
+  const rec: KioskSessionRecord = {
     id: row.id,
     deviceId: row.device_id,
     deviceName: row.device_name,
@@ -85,7 +82,20 @@ export async function lookupKioskSession(
     expiresAt: row.expires_at,
     lockRule: row.lock_rule,
     csrfSecret: row.csrf_secret,
+    lastSeenAt: row.last_seen_at,
   }
+  if (opts.touch !== false) await touchKioskSession(db, clock, rec)
+  return rec
+}
+
+/** Marks the session and its browser as seen now (at most once a minute). */
+export async function touchKioskSession(db: Executor, clock: Clock, rec: KioskSessionRecord): Promise<void> {
+  const now = clock.now().getTime()
+  if (now - rec.lastSeenAt.getTime() < KIOSK_TOUCH_MS) return
+  const at = new Date(now)
+  await db.updateTable('kiosk_sessions').set({ last_seen_at: at }).where('id', '=', rec.id).execute()
+  await db.updateTable('kiosk_devices').set({ last_seen_at: at }).where('id', '=', rec.deviceId).execute()
+  rec.lastSeenAt = at
 }
 
 export interface NewKioskSession {

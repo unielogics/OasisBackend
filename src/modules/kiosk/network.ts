@@ -43,3 +43,78 @@ export function networkOf(input: string | null | undefined): string | null {
 export function networkLabel(cidr: string): string {
   return cidr.endsWith('/32') ? cidr.slice(0, -3) : cidr
 }
+
+/** How long a request's address -> shop network answer is reused (removing a network stops kiosk use from it within this). */
+export const KIOSK_NETWORK_CACHE_MS = 30 * 1000
+/** A shop network's last_seen_at is rewritten at most this often per process. */
+export const KIOSK_NETWORK_SEEN_MS = 5 * 60 * 1000
+const CACHE_MAX = 1000
+
+export interface NetworkMatch {
+  /** The kiosk_networks row the address belongs to, or null. */
+  id: string | null
+  /** The location has at least one shop network. */
+  networkSet: boolean
+}
+
+/**
+ * In-memory answers to "is this address a shop network?" for kiosk-session requests (ADR 0180 amendment A13), reused for 30 seconds;
+ * an add, remove or approve in this process forgets them all at once. Bounded: past 1,000 addresses the expired, then the oldest, go.
+ * Also the per-process throttle of a network's last_seen_at writes.
+ */
+export class KioskNetworkCache {
+  private matches = new Map<string, { at: number; match: NetworkMatch }>()
+  private seen = new Map<string, number>()
+
+  constructor(private readonly now: () => number) {}
+
+  get(locationId: string, address: string): NetworkMatch | null {
+    const key = `${locationId}|${address}`
+    const e = this.matches.get(key)
+    if (!e) return null
+    if (this.now() - e.at >= KIOSK_NETWORK_CACHE_MS) {
+      this.matches.delete(key)
+      return null
+    }
+    return e.match
+  }
+
+  set(locationId: string, address: string, match: NetworkMatch): void {
+    const key = `${locationId}|${address}`
+    const now = this.now()
+    this.matches.delete(key)
+    this.matches.set(key, { at: now, match })
+    if (this.matches.size <= CACHE_MAX) return
+    for (const [k, v] of this.matches) if (now - v.at >= KIOSK_NETWORK_CACHE_MS) this.matches.delete(k)
+    for (const k of this.matches.keys()) {
+      if (this.matches.size <= CACHE_MAX) break
+      this.matches.delete(k)
+    }
+  }
+
+  /** A network was added, removed or approved: every answer is asked again. */
+  forget(): void {
+    this.matches.clear()
+  }
+
+  /** True when the network's last_seen_at should be written now (at most once in 5 minutes per network); marks it written. */
+  shouldMarkSeen(networkId: string): boolean {
+    const now = this.now()
+    const last = this.seen.get(networkId)
+    if (last !== undefined && now - last < KIOSK_NETWORK_SEEN_MS) return false
+    this.markedSeen(networkId)
+    return true
+  }
+
+  /** The network's last_seen_at was just written (an unlock writes it in its own transaction). */
+  markedSeen(networkId: string): void {
+    this.seen.delete(networkId)
+    this.seen.set(networkId, this.now())
+    if (this.seen.size > CACHE_MAX) for (const k of this.seen.keys()) if (this.seen.size > CACHE_MAX) this.seen.delete(k)
+  }
+
+  reset(): void {
+    this.matches.clear()
+    this.seen.clear()
+  }
+}

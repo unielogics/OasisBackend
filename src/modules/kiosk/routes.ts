@@ -79,7 +79,10 @@ export const KioskNetworkSchema = z.object({
   label: z.string().nullable(),
   addedBy: z.string().nullable(),
   addedAt: z.string(),
-  lastSeenAt: z.string().nullable().describe('The last unlock from it'),
+  lastSeenAt: z
+    .string()
+    .nullable()
+    .describe('The last time it was in use: a PIN, an unlocked kiosk or the keypad from it (updated at most every 5 minutes)'),
   failedAttempts: z.number().int(),
   lockedOut: z.boolean(),
 })
@@ -94,6 +97,11 @@ export const KioskRefusedSchema = z.object({
     .boolean()
     .describe('A try carried the cookie of a browser that unlocked at the shop before: the shop’s address probably changed'),
   browserName: z.string().nullable(),
+  shopActiveSince: z
+    .boolean()
+    .describe(
+      'A shop network was in use after this address was first refused: the shop’s usual address still works, so this is not the provider changing it',
+    ),
 })
 
 const EmployeeStatus = z.enum(['active', 'invited', 'inactive'])

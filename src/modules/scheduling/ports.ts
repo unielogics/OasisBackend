@@ -588,6 +588,8 @@ export interface ExternalAlert {
     | 'square_problem'
     // a saved-card charge Square has not confirmed (wave Q3a)
     | 'square_charge_unknown'
+    // kiosk mode (ADR 0180 A15): the shop tablet was refused from a new address while the shop's network went quiet (Super Admins)
+    | 'kiosk_address_changed'
   tone: AlertTone
   title: string
   desc: string
@@ -598,7 +600,8 @@ export interface ExternalAlert {
 
 /** Alerts 10-12 (new reply, SMS device down, card awaiting Squarespace) come from the messaging and payments modules. */
 export interface ExternalAlertSource {
-  list(db: Executor, ctx: { locationId: string; now: Date; manager: boolean }): Promise<ExternalAlert[]>
+  /** `superAdmin`: the reader is a Super Admin (acting as one), for the alerts only they can act on. */
+  list(db: Executor, ctx: { locationId: string; now: Date; manager: boolean; superAdmin?: boolean }): Promise<ExternalAlert[]>
 }
 
 export const noExternalAlerts: ExternalAlertSource = { list: async () => [] }
