@@ -919,7 +919,8 @@ export class KioskService {
   /**
    * POST /kiosk/networks, Super Admin only. `{confirmAddress}`: "This is the shop's network" adds THE CALLER's address (IPv4, or its
    * IPv6 /64), and only when it is still the address the screen showed (409 KIOSK_ADDRESS_CHANGED: a phone that moved between the
-   * Wi-Fi and mobile data meanwhile cannot add the wrong one). `{address}`: approves an address of the refused list, from anywhere
+   * Wi-Fi and mobile data meanwhile cannot add the wrong one; an address that was never the shop's, a VPN's or iCloud Private
+   * Relay's, cannot be told apart here: runbook section 11 step 1 and ADR 0180 A5). `{address}`: approves an address of the refused list, from anywhere
    * (404 KIOSK_REFUSED_UNKNOWN for any other). Adding one that is already a shop network changes nothing (`created: false`).
    */
   async addNetwork(

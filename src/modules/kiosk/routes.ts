@@ -501,7 +501,8 @@ export function registerKioskRoutes(app: AppInstance, identityOf: KioskIdentityP
           'Super Admin only (403 SUPER_ONLY otherwise, in addition to team.roles; viewing as a lesser role does not count). ' +
           '{confirmAddress}: “This is the shop’s network”, from any device on the shop’s Wi-Fi: adds the caller’s own address (an ' +
           'IPv4 address, or its IPv6 /64), only when it still equals the address the screen showed (409 KIOSK_ADDRESS_CHANGED with ' +
-          'meta.yourAddress otherwise, e.g. a phone that switched to mobile data). {address}: approves a "PIN tried from a new network" ' +
+          'meta.yourAddress otherwise, e.g. a phone that switched to mobile data; it cannot detect an address that was never the ' +
+          'shop’s, such as a VPN or iCloud Private Relay, see runbook section 11). {address}: approves a "PIN tried from a new network" ' +
           'entry, from anywhere (404 KIOSK_REFUSED_UNKNOWN for any other address). 201 when added, 200 when it already was one.',
         body: NetworkBody,
         response: {

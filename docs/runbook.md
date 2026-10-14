@@ -655,11 +655,20 @@ network). From anywhere else the keypad says "PINs work only at the shop" and th
    Shop network. It shows "Your address: 203.0.113.7". Tap **This is the shop's network**. Every device on the shop's Wi-Fi shares
    that address, so it does not have to be the tablet. If the screen says your address changed, you switched networks: check the
    Wi-Fi and try again. Managers can see this list but only the Super Admin can add or remove addresses.
+   **Before you tap, on the device you use: turn off any VPN and iCloud Private Relay** (iPhone/iPad: Settings → Wi-Fi → (i) next to
+   the shop Wi-Fi → turn off "Limit IP Address Tracking"; also Settings → your name → iCloud → Private Relay off) and **Wi-Fi Assist**
+   (Settings → Cellular → Wi-Fi Assist off). With any of these on, the address shown is the VPN's, Apple's relay's or the phone
+   carrier's, not the shop's, and the screen cannot tell: tapping would make that shared address "the shop" (strangers on it would
+   count as at the shop, though they would still need a PIN) and the tablet would still be refused. The surest device is the tablet
+   itself (type 0218 on its keypad). Do the same on the **tablet**: no VPN, Private Relay off for the shop Wi-Fi, or its PINs never
+   work.
 2. **PINs (any manager).** Settings → Kiosk → People: for each person who opens the tablet, **Set PIN** (type 8 digits twice) or
    **Generate** and give it to them (it is shown once; write nothing down where customers can see it). A PIN can't start with 0218,
    repeat a digit, run in a row (12345678), repeat a pattern, be a date, be one of that person's last 3 PINs, or be someone else's PIN
    (the screen then just says "Choose another PIN"). Only people with "Shows on the kiosk" ticked can open it.
-3. **Check.** On the tablet (on the shop's Wi-Fi) the keypad no longer says "set the shop network first". Type a PIN: the board opens.
+3. **Check, on the tablet** (on the shop's Wi-Fi): the keypad must show the PIN pad ready, not "PINs work only at the shop" (that
+   means the address you added is not the tablet's: Settings → Kiosk → Shop network → **Remove** it, check step 1's VPN / Private
+   Relay / Wi-Fi Assist settings, and add it again, best from the tablet itself). Type a PIN: the board opens.
    Settings → Kiosk lists the tablet as a shop browser ("Shop browser 1 · Safari on iPad"): rename it ("Front desk tablet"). Recent
    kiosk events show "Unlocked · Marco R.".
 4. On the tablet, turn on the system's own guided access / screen pinning and a screen lock, so the browser can't be left.
@@ -676,8 +685,11 @@ PIN. Changing or removing a PIN does not lock the tablet. Unticking "Shows on th
 
 **The internet provider changed the shop's address** (the keypad on the tablet suddenly says "PINs work only at the shop"): the tablet's
 refused PIN appears in Settings → Kiosk → "PIN tried from a new network" as "Front desk tablet tried from a new network", with the new
-address. The Super Admin taps **Add this network** (from anywhere, even away from the shop), and the tablet works again. An entry from
-an "unknown browser" (not a shop browser) needs care: add it only if you know it was someone at the shop. Remove the old address
+address. The Super Admin taps **Add this network** (from anywhere, even away from the shop), and the tablet works again. **Check the
+browser's name first**: a "shop browser" is any browser that once unlocked at the shop, which can be an employee's own phone; that
+phone typing a PIN from home shows up the same way, and approving it would make their home "the shop". Approve only entries whose
+browser is the tablet (that is why step 3 renames it "Front desk tablet"; remove in Settings → Kiosk any shop browser you do not
+expect). An entry from an "unknown browser" (not a shop browser) needs care: add it only if you know it was someone at the shop. Remove the old address
 (Settings → Kiosk → Shop network → Remove) once it is no longer used. Note: **5G home internet and Starlink-style connections change
 their address often, and share it with other customers** of the same provider: expect to approve new addresses from time to time, and
 know that other people behind that shared address count as "at the shop" (they would still need a valid PIN).
